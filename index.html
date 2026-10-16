@@ -1,0 +1,1227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FlashGaze: training-free multi-scale patch pruning for efficient video understanding</title>
+<meta name="description" content="FlashGaze prunes video patches before the vision encoder with pixel-space costs and a quadtree DP. No training, no auxiliary network.">
+<meta property="og:title" content="FlashGaze">
+<meta property="og:description" content="Training-free multi-scale patch pruning for efficient video understanding.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#060A18">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M14 1.5 4.5 13.5h6.2l-1.6 9L19.5 10h-6.3z' fill='%23FFC61A' stroke='%23B98200' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Schibsted+Grotesk:wght@400;500;600;700;800&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+<script>try{var s=localStorage.getItem('fg-theme')||'dark';document.documentElement.dataset.theme=s}catch(e){}</script>
+<style>
+:root{
+  --paper:#F3F5FA; --surface:rgba(255,255,255,.95); --ink:#0E1B3D; --ink2:#4A5675; --ink3:#7885A3;
+  --rule:#D3DAEA; --rule2:#E7EBF5;
+  --keep:#2457F5; --mid:#F0A400; --coarse:#D3318C; --drop:#8592AB;
+  --screen:#0B1226; --tint:rgba(36,87,245,.07);
+  --surface-solid:#FFFFFF; --tint-solid:#ECF0FE;
+  --bg-rgb:36,62,140; --bolt:#FFC61A; --bolt-edge:#B98200;
+  --a-keep:#D24722; --a-m2:#FEBC00; --a-m4:#24BC25;   /* the colours used in the FlashGaze result video */
+  --glow:radial-gradient(60% 55% at 86% 4%,rgba(36,87,245,.13),transparent 70%),radial-gradient(55% 50% at 4% 96%,rgba(211,49,140,.07),transparent 70%);
+  --font-display:'Schibsted Grotesk','Noto Sans SC','PingFang SC','Microsoft YaHei',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --font-body:'Source Serif 4','Iowan Old Style','Noto Serif SC',Georgia,'Songti SC',serif;
+  --font-mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+html[data-theme=dark]{
+  --paper:#060A18; --surface:rgba(11,17,38,.94); --ink:#EAF0FF; --ink2:#A9B6D6; --ink3:#7E8DB3;
+  --rule:#1E2950; --rule2:#141C3B; --tint:rgba(110,147,255,.10);
+  --keep:#6E93FF; --mid:#FFBE3D; --coarse:#FF67B3; --drop:#7587AD;
+  --screen:#03050E; --surface-solid:#0C1229; --tint-solid:#16214A; --bg-rgb:150,176,255; --bolt:#FFD43B; --bolt-edge:#FFD43B;
+  --glow:radial-gradient(60% 55% at 86% 4%,rgba(36,87,245,.32),transparent 70%),radial-gradient(55% 50% at 4% 96%,rgba(211,49,140,.20),transparent 70%),radial-gradient(40% 38% at 52% 55%,rgba(240,164,0,.05),transparent 70%);
+  color-scheme:dark;
+}
+html[lang^=zh]{--font-body:'Noto Sans SC','PingFang SC','Microsoft YaHei',system-ui,sans-serif}
+
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+html{background:var(--paper)}
+body::before{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;background:var(--glow)}
+#bg{position:fixed;inset:0;width:100%;height:100%;z-index:-1;pointer-events:none}
+body{margin:0;background:transparent;color:var(--ink);font-family:var(--font-body);font-size:18px;line-height:1.65;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:inherit}
+img,svg,canvas{max-width:100%}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--keep);outline-offset:2px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.wrap{max-width:1180px;margin:0 auto;padding:0 28px}
+@media(max-width:640px){.wrap{padding:0 18px}}
+
+/* ---------- nav ---------- */
+.nav{position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--paper) 62%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--rule)}
+.nav .wrap{display:flex;align-items:center;gap:28px;height:56px}
+.brand{font:800 18px var(--font-display);letter-spacing:-.03em;text-decoration:none;display:flex;align-items:center;gap:7px}
+.brand .bolt{width:20px;height:20px;flex:none;fill:var(--bolt);stroke:var(--bolt-edge);stroke-width:1;stroke-linejoin:round;transition:transform .2s}
+.brand:hover .bolt{transform:rotate(-8deg) scale(1.08)}
+.nav nav{display:flex;gap:22px;margin-left:auto}
+.nav nav a{font:500 14px var(--font-display);text-decoration:none;color:var(--ink2);padding:6px 0;border-bottom:2px solid transparent}
+.nav nav a:hover,.nav nav a[aria-current=true]{color:var(--ink);border-color:var(--keep)}
+.tools{display:flex;gap:6px}
+.tbtn{font:600 13px var(--font-display);background:transparent;border:1px solid var(--rule);padding:6px 11px;cursor:pointer;min-width:38px;color:var(--ink)}
+.tbtn:hover{border-color:var(--ink)}
+@media(max-width:900px){.nav nav{display:none}.tools{margin-left:auto}}
+
+/* ---------- hero ---------- */
+.hero{position:relative;padding:clamp(40px,6vw,80px) 0 clamp(56px,8vw,104px);overflow:hidden}
+.hero .wrap{position:relative;display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:clamp(28px,4vw,56px);align-items:center}
+.hero h1{font:800 clamp(52px,7.6vw,100px)/.92 var(--font-display);letter-spacing:-.055em;margin:0 0 22px;overflow-wrap:anywhere}
+.hero .sub{font:600 clamp(20px,2.2vw,27px)/1.2 var(--font-display);letter-spacing:-.02em;margin:0 0 14px;max-width:21em}
+.hero .lead{font-size:19px;color:var(--ink2);max-width:30em;margin:0 0 26px}
+.authors{display:flex;flex-wrap:wrap;gap:4px 18px;font:500 16px var(--font-display);margin:0 0 8px}
+.authors span sup{font-size:.7em;color:var(--ink3);margin-left:1px}
+.affil{display:flex;flex-wrap:wrap;gap:2px 18px;font:400 14px var(--font-display);color:var(--ink2);margin:0 0 26px}
+.btns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;max-width:440px}
+.btns .btn{justify-content:center;text-align:center;padding-inline:10px}
+.btn{display:inline-flex;align-items:center;gap:8px;font:600 14px var(--font-display);padding:10px 16px;text-decoration:none;border:1px solid var(--ink);background:transparent;color:var(--ink);cursor:pointer}
+.btn:hover{background:var(--ink);color:var(--paper)}
+.btn.primary{background:var(--ink);color:var(--paper)}.btn.primary:hover{background:var(--keep);border-color:var(--keep);color:#fff}
+.btn svg{width:15px;height:15px;flex:none}
+@media(max-width:960px){.hero .wrap{grid-template-columns:1fr}}
+
+.finder{position:relative;background:var(--screen);padding:10px;border:1px solid var(--ink)}
+.finder::before,.finder::after{content:"";position:absolute;width:22px;height:22px;border:2px solid var(--keep);pointer-events:none}
+.finder::before{top:-7px;left:-7px;border-right:0;border-bottom:0}
+.finder::after{bottom:-7px;right:-7px;border-left:0;border-top:0}
+.vcmp{position:relative;aspect-ratio:16/9;overflow:hidden;background:var(--screen);cursor:ew-resize;touch-action:pan-y;user-select:none;-webkit-user-select:none}
+.vcmp video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+.vcmp video+video{clip-path:inset(0 0 0 var(--split))}
+.vcmp .vbar{position:absolute;top:0;bottom:0;left:var(--split);width:3px;margin-left:-1.5px;background:#fff;pointer-events:none}
+.vcmp .knob{position:absolute;top:50%;left:var(--split);width:36px;height:36px;margin:-18px 0 0 -18px;border-radius:50%;background:#fff;color:#0B1226;display:grid;place-items:center;box-shadow:0 2px 10px rgba(0,0,0,.45);pointer-events:none}
+.vcmp .knob svg{width:20px;height:20px}
+.vcmp .tag{position:absolute;top:10px;font:600 12px var(--font-display);padding:3px 8px;background:rgba(11,18,38,.78);color:#fff;pointer-events:none}
+.vcmp .tag.l{left:10px}.vcmp .tag.r{right:10px}
+.finder-bar{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;justify-content:space-between;margin-top:14px;font:500 13px var(--font-display);color:var(--ink2)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+.sw{width:12px;height:12px;display:inline-block;flex:none}
+.finder-cap{font:400 14px/1.5 var(--font-display);color:var(--ink2);margin:10px 0 0;max-width:46em}
+
+/* ---------- sections ---------- */
+section.s{padding:clamp(64px,9vw,120px) 0;scroll-margin-top:56px;border-top:1px solid var(--rule)}
+section.s h2{font:700 clamp(30px,4.1vw,50px)/1.06 var(--font-display);letter-spacing:-.035em;margin:0 0 18px;max-width:17em}
+.intro{font-size:19px;color:var(--ink2);max-width:40em;margin:0 0 44px}
+#overview h2.cont{margin-bottom:22px}
+section.s h2.cont{margin-top:76px}
+h3{font:700 20px/1.2 var(--font-display);letter-spacing:-.02em;margin:0 0 8px}
+
+/* quadtree mosaic */
+.mosaic{display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:minmax(210px,auto);gap:2px;background:var(--rule);border:1px solid var(--rule)}
+.tile{background:var(--surface);padding:22px 24px;display:flex;flex-direction:column;justify-content:space-between;gap:14px;position:relative}
+.tile.sm::before{content:"";position:absolute;top:0;left:0;right:0}
+.tile.sm::before{height:3px;background:var(--keep)}
+.tile .num{font:800 clamp(44px,5.4vw,70px)/1 var(--font-display);letter-spacing:-.05em}
+.tile .num small{font-size:.42em;letter-spacing:-.02em;font-weight:700;margin-left:2px}
+.tile p{margin:0;font:400 15px/1.45 var(--font-display);color:var(--ink2)}
+@media(max-width:860px){.mosaic{grid-template-columns:repeat(2,1fr)}}
+/* pipeline */
+.pipe{border:1px solid var(--rule);background:var(--surface);padding:20px 22px 14px}
+.pipe svg{display:block;width:100%;height:auto;overflow:visible}
+@media(max-width:760px){.pipe{overflow-x:auto;-webkit-overflow-scrolling:touch}.pipe svg{min-width:640px;overflow:visible}}
+.pipe .row{cursor:pointer;outline:none}
+.pipe .row .hit{fill:transparent}
+.pipe .row:focus-visible .hit{stroke:var(--keep);stroke-width:2}
+.pipe .rname{font:600 13.5px var(--font-display);fill:var(--ink)}
+.pipe .rname.us{font:800 17px var(--font-display);letter-spacing:-.01em}
+.pipe .b-pre{fill:#EF9A9A}
+.pipe .b-vit{fill:#8CCBEA}
+.pipe .b-llm{fill:#F6C6AD}
+.pipe .sline{stroke:var(--ink2);stroke-width:1.5}
+.pipe .sline.dash{stroke-dasharray:5 4}
+.pipe .rbolt{fill:var(--bolt);stroke:var(--bolt-edge);stroke-width:1;stroke-linejoin:round}
+.pipe .seg{font:500 12px var(--font-display);fill:var(--ink3)}
+.pipe.has-sel .row:not(.on){opacity:.74}
+.pipe-cap{min-height:3.3em;margin:6px 0 4px;font:400 15px/1.5 var(--font-display);color:var(--ink2);max-width:52em}
+.pipe-cap strong{color:var(--ink)}
+.pipe-title{margin:0 0 12px}
+
+/* method */
+.method{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.12fr);gap:clamp(28px,4vw,64px);align-items:start}
+@media(max-width:960px){.method{grid-template-columns:1fr}}
+.steps{list-style:none;margin:0;padding:0;counter-reset:st}
+.steps li{counter-increment:st;position:relative;padding:0 0 30px 58px;border-left:0}
+.steps li::before{content:counter(st);position:absolute;left:0;top:0;width:38px;height:38px;display:grid;place-items:center;font:700 17px var(--font-display);background:var(--ink);color:var(--paper)}
+.steps li::after{content:"";position:absolute;left:18px;top:42px;bottom:4px;width:2px;background:var(--rule)}
+.steps li:last-child::after{display:none}
+.steps p{margin:0;color:var(--ink2);font-size:17px}
+.eq{margin:8px 0 0;border:1px solid var(--rule);background:var(--surface);padding:16px 20px;font:400 17px/1.8 var(--font-body);overflow-x:auto}
+.eq .lab{display:block;font:500 13px var(--font-display);color:var(--ink3);margin-bottom:4px}
+.eq i{font-style:italic}.eq .big{font-size:1.18em}
+.panel{background:var(--surface);border:1px solid var(--rule)}
+.scm{padding:22px 24px}
+.scm h3{margin-bottom:6px}.scm>p{margin:0 0 18px;color:var(--ink2);font-size:16px}
+.scm-grid{display:grid;grid-template-columns:minmax(150px,200px) minmax(0,1fr);gap:20px 26px;align-items:start}
+@media(max-width:560px){.scm-grid{grid-template-columns:1fr}}
+.scm-sliders{display:grid;gap:8px}
+.ctl label,.ctl .lab{display:flex;justify-content:space-between;gap:10px;font:500 13px var(--font-display);color:var(--ink2)}
+.ctl .v{font-variant-numeric:tabular-nums;color:var(--ink);font-weight:600}
+.scm-out{font:500 14px/1.5 var(--font-display);margin:12px 0 0;min-height:2.9em}
+.scm svg{display:block;width:100%;height:auto}
+
+/* controls */
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:24px;background:transparent;margin:0;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:4px;background:var(--rule)}
+input[type=range]::-moz-range-track{height:4px;background:var(--rule)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;margin-top:-6px;background:var(--keep);border:2px solid var(--surface);box-shadow:0 0 0 1px var(--keep)}
+input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:0;background:var(--keep);border:2px solid var(--surface);box-shadow:0 0 0 1px var(--keep)}
+
+/* cite, footer */
+.bib{position:relative;border:1px solid var(--rule);background:var(--surface)}
+.bib pre{margin:0;padding:22px 24px;overflow-x:auto;font:400 14px/1.7 var(--font-mono);color:var(--ink)}
+.bib .btn{position:absolute;top:12px;right:12px;padding:7px 12px;font-size:13px;background:var(--surface)}
+footer{border-top:1px solid var(--rule);padding:36px 0 56px;font:400 14px/1.6 var(--font-display);color:var(--ink2)}
+footer .wrap{display:flex;flex-wrap:wrap;gap:12px 40px;justify-content:space-between}
+footer p{margin:0;max-width:44em}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+
+/* slots: placeholders for content to be added later (video, results) */
+.vslot{margin:36px 0 56px}
+.vslot figcaption{font:400 14px/1.5 var(--font-display);color:var(--ink2);margin-top:12px;max-width:52em}
+.vslot figcaption:empty{display:none}
+.slot{position:relative;display:grid;place-content:center;justify-items:center;gap:14px;text-align:center;font:600 16px var(--font-display);color:var(--ink2)}
+.slot.video{aspect-ratio:16/9;background:var(--screen);border:1px solid var(--ink);padding:10px}
+.slot.video::before,.slot.video::after{content:"";position:absolute;width:22px;height:22px;border:2px solid var(--keep);pointer-events:none}
+.slot.video::before{top:-7px;left:-7px;border-right:0;border-bottom:0}
+.slot.video::after{bottom:-7px;right:-7px;border-left:0;border-top:0}
+.slot.video.empty{border:1px dashed var(--ink3);background:var(--surface);color:var(--ink2)}
+.slot .play{display:grid;place-items:center;width:64px;height:64px;border-radius:50%;border:2px solid var(--keep);color:var(--keep)}
+.slot .play svg{width:30px;height:30px}
+.slot.video video,.slot.video iframe{position:absolute;inset:10px;width:calc(100% - 20px);height:calc(100% - 20px);border:0;background:#000}
+.slot.block{min-height:260px;border:1px dashed var(--ink3);background:var(--surface)}
+
+.sw.fine{background:var(--a-keep)}.sw.m2{background:var(--a-m2)}.sw.m4{background:var(--a-m4)}
+.sw.drop{background:var(--screen);border:1px solid var(--ink3)}
+.btn.play{padding:12px 22px;font-size:16px;min-width:124px;gap:10px;justify-content:center}
+.btn.play svg{width:19px;height:19px}
+
+/* visualize: one big Original | FlashGaze pair, strip of small previews below */
+.vis-head{display:flex;flex-wrap:wrap;gap:12px 28px;align-items:center;margin:0 0 18px;font:500 13px var(--font-display);color:var(--ink2)}
+.vstage{border:1px solid var(--rule);background:var(--surface);padding:14px}
+.vmain{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.vs{position:relative;aspect-ratio:16/9;overflow:hidden;background:var(--screen);border:1px solid var(--rule)}
+.vs video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.vs video[hidden]{display:none}
+.vs .tag{position:absolute;top:10px;left:10px;z-index:1;font:600 13px var(--font-display);padding:4px 10px;background:rgba(11,18,38,.8);color:#fff;pointer-events:none}
+.vs.fg{border-color:var(--bolt);box-shadow:0 0 0 1px color-mix(in srgb,var(--bolt) 55%,transparent),0 0 34px color-mix(in srgb,var(--bolt) 16%,transparent)}
+.vs.fg .tag{box-shadow:inset 3px 0 0 var(--bolt);padding-left:13px}
+.vs.empty{background:var(--surface);border:1px dashed var(--ink3);box-shadow:none;display:grid;place-items:center}
+.vs.empty::after{content:"";width:0;height:0;border-style:solid;border-width:14px 0 14px 23px;border-color:transparent transparent transparent var(--ink3);opacity:.55;margin-left:5px}
+.vs.empty .tag{background:var(--tint);color:var(--ink2)}
+.vinfo{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:14px 2px}
+.vnow{margin:0;min-width:0;font:500 17px/1.4 var(--font-display);color:var(--ink)}
+.vcount{font-weight:700;font-size:14px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.vcaptxt{margin-left:12px;padding-left:14px;border-left:1px solid var(--rule)}
+.vcaptxt:empty{display:none}
+.vstripwrap{position:relative}
+.vstrip{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x proximity;scroll-padding:0 8px;padding:8px 8px 12px;scrollbar-width:thin;scrollbar-color:var(--rule) transparent}
+.vthumb{flex:0 0 calc((100% - 76px) / 7);scroll-snap-align:start;position:relative;padding:0;border:0;background:none;cursor:pointer;text-align:left;font:inherit;color:inherit;opacity:.8;transition:opacity .15s}
+.vthumb:hover,.vthumb[aria-selected=true]{opacity:1}
+.vthumb .tv{display:block;position:relative;aspect-ratio:16/9;overflow:hidden;background:var(--screen);border:1px solid var(--rule)}
+.vthumb video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none}
+.vthumb .tn{position:absolute;top:6px;left:6px;z-index:1;font:700 11px var(--font-display);padding:1px 6px;background:rgba(11,18,38,.82);color:#fff}
+.vthumb .tl{position:absolute;left:0;right:0;bottom:0;z-index:1;padding:16px 8px 6px;font:500 12px/1.25 var(--font-display);color:#fff;background:linear-gradient(transparent,rgba(5,8,20,.88));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vthumb.empty .tv{background:var(--surface);border:1px dashed var(--ink3)}
+.vthumb.empty .tl{background:none;color:var(--ink2)}
+.vthumb.empty .tv::after{content:"";position:absolute;left:50%;top:44%;margin:-8px 0 0 -5px;border-style:solid;border-width:8px 0 8px 13px;border-color:transparent transparent transparent var(--ink3);opacity:.5}
+.vthumb[aria-selected=true] .tv{outline:2px solid var(--bolt);outline-offset:2px;box-shadow:0 0 22px color-mix(in srgb,var(--bolt) 26%,transparent)}
+.vthumb:focus-visible .tv{outline:2px solid var(--keep);outline-offset:2px}
+.vnav{position:absolute;top:calc(50% - 4px);transform:translateY(-50%);z-index:2;width:34px;height:34px;border-radius:50%;border:1px solid var(--ink3);background:var(--paper);color:var(--ink);display:grid;place-items:center;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.35)}
+.vnav svg{width:18px;height:18px}
+.vnav[hidden]{display:none}
+.vnav.prev{left:-8px}.vnav.next{right:-8px}
+@media(max-width:760px){.vmain{grid-template-columns:1fr;gap:10px}.vthumb{flex-basis:calc((100% - 36px) / 2.4)}.vinfo{align-items:flex-start}.vnow{font-size:15px}}
+
+/* abstract + Fig. 1 */
+.abstract{margin:0;font-size:18px;line-height:1.75;color:var(--ink)}
+.fig{margin:56px 0 0}
+.fig .slot.block{aspect-ratio:16/7;min-height:0}
+.fig img{display:block;width:100%;height:auto;background:#fff;border:1px solid var(--rule)}
+.fig figcaption{margin-top:16px;text-align:center;font:500 16px/1.5 var(--font-display);color:var(--ink2)}
+
+/* results: blocks and tables */
+.rblock{background:var(--surface);border:1px solid var(--rule);padding:22px 24px 20px;margin-top:28px}
+.rhead{display:flex;gap:16px;align-items:baseline;margin:0 0 18px}
+.rhead.rfoot{margin:18px 0 0}
+.rcap{margin:0;font:400 15px/1.5 var(--font-display);color:var(--ink2);max-width:60em}
+.rnote{margin:12px 0 0;font:400 13px/1.5 var(--font-display);color:var(--ink3)}
+.rblock .slot.block{aspect-ratio:16/7;min-height:0}
+.rblock img{display:block;width:100%;height:auto;background:#fff;border:1px solid var(--rule)}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table.dt{border-collapse:separate;border-spacing:0;width:100%;font:400 14px var(--font-display);font-variant-numeric:tabular-nums}
+table.dt th,table.dt td{padding:7px 12px;text-align:right;white-space:nowrap;border-top:1px solid var(--rule2);background:var(--surface-solid)}
+table.dt th.m,table.dt td.m{text-align:left;position:sticky;left:0;z-index:1}
+table.dt thead th{font-variant-numeric:normal;font-weight:600;color:var(--ink2);border-top:0;vertical-align:bottom;padding-bottom:9px}
+table.dt thead th small{display:block;font-weight:400;font-size:11.5px;color:var(--ink3)}
+table.dt th.grp{text-align:center;border-bottom:1px solid var(--rule);color:var(--ink)}
+table.dt .gl{border-left:1px solid var(--rule2)}
+table.dt tr.sec td{background:var(--tint-solid);font-weight:700;text-align:left;color:var(--ink);padding:6px 12px}
+table.dt tr.us td{background:var(--tint-solid);font-weight:700}
+table.dt tr.base td{color:var(--ink2)}
+table.dt tr.top td{border-top:1px solid var(--rule)}
+table.dt td.rr{text-align:center;vertical-align:middle;font-weight:700;color:var(--ink2);border-left:1px solid var(--rule2);border-right:1px solid var(--rule2)}
+table.dt td.best{color:var(--keep);font-weight:800}
+table.dt tr.us td.best{color:var(--keep)}
+.tbolt{width:13px;height:13px;margin:0 6px -2px 0;fill:var(--bolt);stroke:var(--bolt-edge);stroke-width:1;stroke-linejoin:round}
+table.t3 thead th{white-space:normal;line-height:1.25;text-align:right}
+table.t3 thead th.m{text-align:left}
+table.t3 th,table.t3 td{padding-left:10px;padding-right:10px}
+table.dt thead th{word-break:keep-all;overflow-wrap:normal}
+.arr{width:9px;height:11px;margin-left:5px;vertical-align:-1px;fill:none;stroke:var(--keep);stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+table.t3 th,table.t3 td{padding-top:5px;padding-bottom:5px}
+table.t3 thead th{padding-bottom:7px}
+
+/* analysis: two halves, rows aligned with subgrid */
+.acols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;margin-top:8px}
+.acol.rblock{margin-top:0}
+.ahead{margin:0 0 20px;font:700 clamp(22px,2.3vw,30px)/1.15 var(--font-display);letter-spacing:-.025em}
+.acol .slot.block{aspect-ratio:4/3;min-height:0}
+.acol img{display:block;width:100%;height:auto;background:#fff;border:1px solid var(--rule)}
+.abody{margin:20px 0 0;font:400 17px/1.65 var(--font-body);color:var(--ink)}
+@supports (grid-template-rows:subgrid){
+  .acols{grid-template-rows:auto auto auto}
+  .acol.rblock{display:grid;grid-row:span 3;grid-template-rows:subgrid;row-gap:0}
+}
+@media(max-width:860px){
+  .acols{grid-template-columns:minmax(0,1fr);grid-template-rows:none}
+  .acol.rblock{display:block;grid-row:auto}
+}
+.awide{margin-top:24px}
+.awide .abody{max-width:56em}
+
+</style>
+</head>
+<body>
+<canvas id="bg" aria-hidden="true"></canvas>
+<a class="sr" href="#overview">Skip to content</a>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top"><svg class="bolt" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 1.500 4.500 13.500h6.200l-1.600 9L19.500 10h-6.300z"/></svg>FlashGaze</a>
+    <nav aria-label="Sections">
+      <a href="#overview" data-i18n="nav.overview"></a>
+      <a href="#where" data-i18n="nav.where"></a>
+      <a href="#method" data-i18n="nav.method"></a>
+      <a href="#visualize" data-i18n="nav.vis"></a>
+      <a href="#results" data-i18n="nav.results"></a>
+      <a href="#analysis" data-i18n="nav.analysis"></a>
+      <a href="#cite" data-i18n="nav.cite"></a>
+    </nav>
+    <div class="tools">
+      <button class="tbtn" id="langBtn" type="button" aria-label="Language"></button>
+      <button class="tbtn" id="themeBtn" type="button" aria-label="Theme"></button>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+<section class="hero" aria-labelledby="h1">
+  <div class="wrap">
+    <div>
+      <h1 id="h1">FlashGaze</h1>
+      <p class="sub" data-i18n="hero.sub"></p>
+      <p class="lead" data-i18n="hero.lead"></p>
+      <p class="authors">
+        <span>Ziye Zhu<sup>1,2</sup></span><span>Yanghao Zhou<sup>2</sup></span><span>Lixing Tan<sup>2</sup></span>
+        <span>Jialiang Kang<sup>2</sup></span><span>Shuxuan Li<sup>2,3</sup></span><span>Xiao Yang<sup>2,*</sup></span>
+      </p>
+      <p class="affil">
+        <span><sup>1</sup> <span data-i18n="aff.1"></span></span><span><sup>2</sup> <span data-i18n="aff.2"></span></span>
+        <span><sup>3</sup> <span data-i18n="aff.3"></span></span><span><sup>*</sup> <span data-i18n="aff.c"></span></span>
+      </p>
+      <div class="btns" id="heroBtns">
+        <a class="btn" id="lnkQuick" href="#method"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M9.200 1.500 3.500 9h4l-.700 5.500L12.500 7h-4z"/></svg><span data-i18n="btn.quick"></span></a>
+        <a class="btn primary" id="lnkPaper" href="#" target="_blank" rel="noopener"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3.5 1.5h6l3 3v10h-9z"/><path d="M9.5 1.5v3h3M5.5 8h5M5.5 11h5"/></svg><span data-i18n="btn.paper"></span></a>
+        <a class="btn" id="lnkVis" href="#visualize"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="m6.5 6 3.500 2-3.500 2z" fill="currentColor" stroke="none"/></svg><span data-i18n="btn.vis"></span></a>
+        <a class="btn" href="#cite"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path fill="currentColor" stroke="none" d="M2.5 11.200c0-3.200 1.100-5.300 3.700-6.200l.5 1.100c-1.500.7-2.200 1.800-2.200 3.100H6.700v3.800H2.500zM9 11.200c0-3.200 1.100-5.300 3.700-6.200l.5 1.100c-1.500.7-2.200 1.800-2.200 3.100h2.200v3.800H9z"/></svg><span data-i18n="btn.cite"></span></a>
+      </div>
+    </div>
+    <div>
+      <div class="finder" id="heroFinder" style="--split:46%">
+        <div class="vcmp" id="vcmp" role="img" aria-label="Side-by-side comparison: an original video of a horse and rider, and the same video after FlashGaze pruning">
+          <video id="vFg" src="assets/horse_fg.mp4" muted loop playsinline preload="auto" disablepictureinpicture tabindex="-1"></video>
+          <video id="vOri" src="assets/horse_ori.mp4" muted loop playsinline preload="auto" disablepictureinpicture tabindex="-1"></video>
+          <span class="vbar" aria-hidden="true"></span>
+          <span class="knob" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 7 4 12l5 5zM15 7l5 5-5 5z" fill="currentColor"/></svg></span>
+          <span class="tag l" data-i18n="hero.fg"></span><span class="tag r" data-i18n="hero.orig"></span>
+        </div>
+      </div>
+      <div class="finder-bar">
+        <div class="legend">
+          <span><i class="sw fine"></i><span data-i18n="leg.keep"></span></span>
+          <span><i class="sw m2"></i><span data-i18n="leg.mid"></span></span>
+          <span><i class="sw m4"></i><span data-i18n="leg.coarse"></span></span>
+          <span><i class="sw drop"></i><span data-i18n="leg.drop"></span></span>
+        </div>
+        <button class="btn play" id="heroPlay" type="button" aria-pressed="true"></button>
+      </div>
+      <input type="range" id="heroSplit" min="0" max="100" value="46" aria-label="Comparison position" style="margin-top:8px">
+      <p class="finder-cap" data-i18n="hero.cap"></p>
+    </div>
+  </div>
+</section>
+
+<section class="s" id="overview" aria-labelledby="h-ov">
+  <div class="wrap">
+    <h2 class="sr" id="h-ov" data-i18n="ov.h2"></h2>
+    <div class="mosaic">
+      <div class="tile sm"><div class="num">98<small>%</small></div><p data-i18n="ov.b"></p></div>
+      <div class="tile sm"><div class="num">13<small>&times;</small></div><p data-i18n="ov.c"></p></div>
+      <div class="tile sm"><div class="num">1.8<small>&times;</small></div><p data-i18n="ov.d"></p></div>
+      <div class="tile sm"><div class="num">1.5K<small>/4K</small></div><p data-i18n="ov.e"></p></div>
+    </div>
+    <h2 class="cont" id="h-abs" data-i18n="abs.h2"></h2>
+    <p class="abstract" data-i18n="abs.p"></p>
+    <!-- Fig. 1: set SITE.fig1.src in the script (top of the page) to show the image -->
+    <figure class="fig" id="fig1">
+      <div class="slot block" id="fig1Slot"><span data-i18n="fig1.soon"></span></div>
+      <figcaption data-i18n="fig1.cap"></figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="s" id="where" aria-labelledby="h-wh1">
+  <div class="wrap">
+    <h2 id="h-wh1" data-i18n="wh.h1"></h2>
+    <p class="intro" data-i18n="wh.p0"></p>
+    <h2 class="cont" id="h-wh" data-i18n="wh.h2"></h2>
+    <p class="intro" data-i18n="wh.p"></p>
+    <h3 class="pipe-title" data-i18n="wh.lat"></h3>
+    <div class="pipe" id="pipe"></div>
+    <p class="pipe-cap" id="pipeCap" aria-live="polite"></p>
+  </div>
+</section>
+
+<section class="s" id="method" aria-labelledby="h-me">
+  <div class="wrap">
+    <h2 id="h-me" data-i18n="me.h2"></h2>
+    <!-- Method video slot. Configure it in SITE.methodVideo (top of the script): local file, or an embed URL. -->
+    <figure class="vslot" id="methodVideo">
+      <div class="slot video empty" id="methodVideoFrame">
+        <span class="play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 6.500v11l9-5.500z" fill="currentColor"/></svg></span>
+        <span data-i18n="me.vid"></span>
+      </div>
+      <figcaption id="methodVideoCap"></figcaption>
+    </figure>
+    <div class="method">
+      <div>
+        <ol class="steps">
+          <li><h3 data-i18n="me.s1.t"></h3><p data-i18n="me.s1.p"></p></li>
+          <li><h3 data-i18n="me.s2.t"></h3><p data-i18n="me.s2.p"></p></li>
+          <li><h3 data-i18n="me.s3.t"></h3><p data-i18n="me.s3.p"></p></li>
+        </ol>
+        <div class="eq">
+          <span class="lab" data-i18n="me.eq"></span>
+          <i class="big">A</i><sub><i>t</i></sub><sup>*</sup> = argmin<sub><i>A</i><sub><i>t</i></sub></sub> [ &sum;<sub>(<i>p</i>,<i>a</i>)&isin;<i>A</i><sub><i>t</i></sub></sub> Cost(<i>p</i>, <i>a</i>) + <i>&lambda;N</i><sub><i>t</i></sub> ]&emsp;s.t.&ensp;<i>N</i><sub><i>t</i></sub> &le; <i>B</i>
+        </div>
+      </div>
+      <div class="panel scm" id="scm">
+        <h3 data-i18n="scm.h"></h3>
+        <p data-i18n="scm.p"></p>
+        <div class="scm-grid">
+          <div>
+            <svg id="scmGrid" viewBox="0 0 164 164" role="img" aria-label="Four fine patches"></svg>
+            <div class="ctl" style="margin-top:10px"><div class="lab"><span data-i18n="scm.n"></span><span class="v" id="scmNv"></span></div>
+              <input type="range" id="scmN" min="0" max="4" step="1" value="1" aria-label="n"></div>
+          </div>
+          <div class="scm-sliders" id="scmSliders"></div>
+        </div>
+        <div style="margin-top:14px"><svg id="scmChart" viewBox="0 0 440 176" role="img" aria-label="Minimum cost per retained patch count"></svg></div>
+        <p class="scm-out" id="scmOut" aria-live="polite"></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="s" id="visualize" aria-labelledby="h-vis">
+  <div class="wrap">
+    <h2 id="h-vis" data-i18n="vis.h2"></h2>
+    <p class="intro" data-i18n="vis.p"></p>
+    <div class="vis-head">
+      <div class="legend">
+        <span><i class="sw fine"></i><span data-i18n="leg.keep"></span></span>
+        <span><i class="sw m2"></i><span data-i18n="leg.mid"></span></span>
+        <span><i class="sw m4"></i><span data-i18n="leg.coarse"></span></span>
+        <span><i class="sw drop"></i><span data-i18n="leg.drop"></span></span>
+      </div>
+    </div>
+    <div class="vstage" id="vstage">
+      <div class="vmain">
+        <div class="vs ori empty" id="vsOri"><span class="tag" data-i18n="hero.orig"></span><video muted loop playsinline preload="none" disablepictureinpicture tabindex="-1" hidden></video></div>
+        <div class="vs fg empty" id="vsFg"><span class="tag" data-i18n="hero.fg"></span><video muted loop playsinline preload="none" disablepictureinpicture tabindex="-1" hidden></video></div>
+      </div>
+      <div class="vinfo">
+        <p class="vnow"><span class="vcount" id="vCount"></span><span class="vcaptxt" id="vCap"></span></p>
+      </div>
+      <div class="vstripwrap">
+        <button class="vnav prev" id="vPrev" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="vstrip" id="vStrip" role="tablist"></div>
+        <button class="vnav next" id="vNext" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="s" id="results" aria-labelledby="h-re">
+  <div class="wrap">
+    <h2 id="h-re" data-i18n="res.h2"></h2>
+
+    <div class="rblock" id="rT1">
+      <div class="rhead"><p class="rcap" data-i18n="res.t1.cap"></p></div>
+      <div class="scroll"><table class="dt t1" id="tblT1"></table></div>
+      <p class="rnote" data-i18n="res.t1.note"></p>
+    </div>
+
+    <div class="rblock" id="rT3">
+      <div class="rhead"><p class="rcap" data-i18n="res.t3.cap"></p></div>
+      <div class="scroll"><table class="dt t3" id="tblT3"></table></div>
+    </div>
+
+    <!-- Figure 4: set SITE.fig4.src in the script (top of the page) to show the image -->
+    <div class="rblock" id="rF4">
+      <div class="slot block" id="fig4Slot"><span data-i18n="img.soon"></span></div>
+      <div class="rhead rfoot"><p class="rcap" data-i18n="res.f4.cap"></p></div>
+    </div>
+
+    <h2 class="cont" id="h-long" data-i18n="res.long"></h2>
+
+    <div class="rblock" id="rT2">
+      <div class="rhead"><p class="rcap" data-i18n="res.t2.cap"></p></div>
+      <div class="scroll"><table class="dt t2" id="tblT2"></table></div>
+    </div>
+  </div>
+</section>
+
+<section class="s" id="analysis" aria-labelledby="h-ana">
+  <div class="wrap">
+    <h2 id="h-ana" data-i18n="ana.h2"></h2>
+    <!-- Two halves. Images: set SITE.fig5a / SITE.fig5b in the script (top of the page) -->
+    <div class="acols">
+      <div class="acol rblock">
+        <h3 class="ahead" data-i18n="ana.a.h"></h3>
+        <div class="slot block" id="fig5aSlot"><span data-i18n="img.soon"></span></div>
+        <p class="abody" data-i18n="ana.a.p"></p>
+      </div>
+      <div class="acol rblock">
+        <h3 class="ahead" data-i18n="ana.b.h"></h3>
+        <div class="slot block" id="fig5bSlot"><span data-i18n="img.soon"></span></div>
+        <p class="abody" data-i18n="ana.b.p"></p>
+      </div>
+    </div>
+
+    <!-- Full-width block under the two halves: no heading, no caption. Image: SITE.fig2 -->
+    <div class="rblock awide">
+      <div class="slot block" id="fig2Slot"><span data-i18n="img.soon"></span></div>
+      <p class="abody" data-i18n="ana.c.p"></p>
+    </div>
+  </div>
+</section>
+
+<section class="s" id="cite" aria-labelledby="h-ci">
+  <div class="wrap">
+    <h2 id="h-ci" data-i18n="ci.h2"></h2>
+    <div class="bib">
+      <button class="btn" id="btnCopy" type="button" data-i18n="ci.copy"></button>
+<pre id="bibtex">@misc{zhu2026flashgaze,
+  title        = {{FlashGaze}: Training-Free Multi-Scale Patch Pruning for Efficient Video Understanding},
+  author       = {Zhu, Ziye and Zhou, Yanghao and Tan, Lixing and Kang, Jialiang and Li, Shuxuan and Yang, Xiao},
+  howpublished = {arXiv preprint arXiv:2610.04225},
+  year         = {2026}
+}</pre>
+    </div>
+  </div>
+</section>
+</main>
+<footer><div class="wrap"><p>Peking University &nbsp; Canva Research &nbsp; Sun Yat-sen University</p></div></footer>
+
+<script>
+/* =====================================================================
+   HOW TO ADD YOUR VIDEOS AND IMAGES   (you only need to edit the SITE block below)
+
+   1. Keep index.html next to its assets/ folder:        index.html
+                                                         assets/            <- put your files here
+                                                         assets/vis/        <- the 8 Visualization clips
+   2. Copy your video files into those folders.
+   3. In the SITE block, replace each `null` with the file path, for example
+        { ori: 'assets/vis/01_ori.mp4', fg: 'assets/vis/01_fg.mp4' },   // clip 01
+        methodVideo: { src: 'assets/method.mp4' },                       // video in the Method section
+        fig4: { src: 'assets/fig4.png' },                                 // an image
+   4. Save the file and reload the page. Anything you leave as `null` stays an empty slot.
+   Paths are relative to index.html, use forward slashes, and are case sensitive.
+   The two videos of a clip must have the same length, frame rate and 16:9 ratio.
+   ===================================================================== */
+/* =====================================================================
+   Site configuration  (edit this block)
+   ===================================================================== */
+const SITE = {
+  links: {
+    paper: 'https://arxiv.org/abs/2610.04225'   // the "arXiv" button at the top of the page
+  },
+  /* Method video. Use ONE of: a local file, or an embed URL (YouTube / Bilibili / any iframe src).
+       methodVideo: { src: 'assets/method.mp4' }
+       methodVideo: { embed: 'https://player.bilibili.com/player.html?bvid=BVxxxxxxxx&autoplay=0' }
+     Leave everything null to show the "coming soon" slot. */
+  methodVideo: { src: 'anon4method/Method_video.mp4', embed: null, cap: { en: '', zh: '' } },
+  /* "Visualization" section: a big Original | FlashGaze pair, with a strip of small Original previews below it. Clicking a
+     preview switches the big pair. 8 clips; empty slots are shown until you fill them in.
+     Per group:  ori: 'assets/vis/01_ori.mp4',  fg: 'assets/vis/01_fg.mp4'
+     optional:   cap: { en: '...', zh: '...' }   (caption shown under the pair and on the small preview)
+     Both videos of a group must have the same length, frame rate and aspect ratio (16:9). */
+  visualize: [
+    { ori: 'assets/camel_ori.mp4', fg: 'assets/camel_fg.mp4' },   // 01
+    { ori: 'assets/cp_ori.mp4', fg: 'assets/cp_fg.mp4' },   // 02
+    { ori: 'assets/light_ori.mp4', fg: 'assets/light_fg.mp4' },   // 03
+    { ori: 'assets/boxing_ori.mp4', fg: 'assets/boxing_fg.mp4' },   // 04
+    { ori: 'assets/kneel_ori.mp4', fg: 'assets/kneel_fg.mp4' },   // 05
+    { ori: 'assets/skate_ori.mp4', fg: 'assets/skate_fg.mp4' },    // 06
+    { ori: 'assets/cycle_ori.mp4', fg: 'assets/cycle_fg.mp4' },   // 07
+    { ori: 'assets/golf_ori.mp4', fg: 'assets/golf_fg.mp4' }   // 08
+  ],
+  /* Fig. 1 (under the Abstract). Put the image in ./assets/ and set the path, e.g. src: 'assets/fig1.png'. null = empty slot. */
+  fig1: { src: 'assets/Fig1.png' },
+  /* Figure 4 (Results). Put the image in ./assets/ and set the path, e.g. src: 'assets/fig4.png'. null = empty slot. */
+  fig4: { src: 'assets/latency_combined.svg' },
+  /* Analysis: the two images (paper Fig. 5, left and right panel). Same format, e.g. src: 'assets/fig5-left.png'. */
+  fig5a: { src: 'assets/analysis1.svg'},
+  fig5b: { src: 'assets/analysis2.svg' },
+  /* Analysis, full-width image under the two halves: visualization of pruned videos (paper Fig. 2). Same format, e.g. src: 'assets/fig2.png'. */
+  fig2: { src: 'assets/visualize.png' }
+};
+
+const I18N = {
+en: {
+  'doc.title': 'FlashGaze: training-free multi-scale patch pruning for efficient video understanding',
+  'nav.overview': 'Overview', 'nav.where': 'Motivation', 'nav.method': 'Method', 'nav.vis': 'Visualization', 'nav.results': 'Results', 'nav.analysis': 'Analysis', 'nav.cite': 'Citation',
+  'hero.sub': 'Training-free multi-scale patch pruning for efficient video understanding',
+  'hero.lead': 'Drop what hasn\u2019t changed, merge what is smooth, keep what has detail. All of it happens before the vision encoder runs.',
+  'btn.paper': 'arXiv', 'btn.quick': 'Quick Understanding', 'btn.vis': 'Visualization', 'btn.cite': 'BibTeX',
+  'aff.1': 'Peking University', 'aff.2': 'Canva Research', 'aff.3': 'Sun Yat-sen University', 'aff.c': 'Corresponding author',
+  'hero.orig': 'Original', 'hero.fg': 'FlashGaze', 'hero.play': 'Play', 'hero.pause': 'Pause',
+  'hero.cap': 'Drag to compare the original clip with the FlashGaze result. Dark areas are dropped. The boxes mark the patches that are kept, at three scales.',
+  'leg.keep': 'Kept', 'leg.mid': 'Merged 2\u00d7', 'leg.coarse': 'Merged 4\u00d7', 'leg.drop': 'Dropped',
+  'ov.h2': 'Overview',
+  'abs.h2': 'Abstract',
+  'abs.p': 'Multimodal Large Language Models (MLLMs) have demonstrated strong performance in video understanding, yet efficiently processing long, high-resolution videos remains challenging. Such videos often contain substantial spatiotemporal redundancy, and processing redundant visual tokens can incur avoidable computational overhead. Many existing methods prune visual tokens during or after vision transformer (ViT) encoding, leaving much of the encoding cost unaddressed. Some approaches prune patches before encoding but rely on learned auxiliary networks for patch selection, incurring additional training and inference overhead. To address these limitations, we propose FlashGaze, a training-free method that reduces spatiotemporal redundancy before ViT encoding without introducing auxiliary networks. FlashGaze uses pixel-space differences as a proxy for information loss and employs Quadtree Dynamic Programming to jointly optimize patch dropping, merging, and keeping under a fixed budget. Experiments on two MLLM backbones across multiple benchmarks demonstrate substantial efficiency gains while largely preserving accuracy. On Qwen3-VL-8B, FlashGaze retains 98% of the full-input baseline accuracy on LongVideoBench while achieving up to 5.4\u00d7 and 17\u00d7 speedups in ViT encoding and MLLM prefill, respectively, and reducing peak GPU memory usage by a factor of 1.8. These efficiency gains enable the model to process videos with more frames and higher resolutions on the same GPU hardware, unlocking video understanding at scales previously out of reach.',
+  'fig1.cap': 'We propose FlashGaze, a training-free patch pruning method.',
+  'fig1.soon': 'Figure 1 coming soon',
+  'ov.b': 'of full-input accuracy on LongVideoBench while keeping 20% of the tokens',
+  'ov.c': 'faster time to first token: 5.4\u00d7 in the ViT, 17\u00d7 in MLLM prefill',
+  'ov.d': 'lower peak GPU memory, 106.4 to 58.2 GiB on LongVideoBench',
+  'ov.e': 'Scales Qwen3-VL-8B to 1,536 frames at 3,840 px and beats the unpruned model on all six benchmarks',
+  'wh.h1': 'There are many temporal and spatial redundancies in videos',
+  'wh.p0': 'Long, high-resolution videos produce massive visual token sequences, leading to substantial computational overhead. However, much of the visual content is redundant: static backgrounds repeat across consecutive frames, while flat or low-texture regions within each frame contain little spatial information.',
+  'wh.h2': 'The later you prune, the more unnecessary computation is incurred',
+  'wh.p': 'Existing methods prune visual tokens inside the ViT, after ViT encoding, or within the LLM. However, these methods cannot eliminate the computation already performed in earlier stages. Learned patch selectors enable earlier pruning but introduce additional network overhead. In contrast, pruning directly at the video input stage can reduce computation throughout the entire pipeline. Select a row to see at which stage each method prunes tokens.',
+  'st.pre': 'Pre-ViT', 'st.vit': 'ViT encoder', 'st.llm': 'MLLM prefill',
+  'wh.none': 'No pruning', 'wh.vanilla': 'No pruning. Every token goes through every stage.',
+  'wh.ToMe': 'Merges similar tokens layer by layer inside the ViT, so the early layers still see everything.',
+  'wh.VisionZip': 'Compresses the ViT output. By then the whole ViT has already run on every token.',
+  'wh.FastV': 'Prunes inside the LLM after its first layers. The ViT and the early LLM layers see every token.',
+  'wh.AutoGaze': 'Prunes before the ViT, but needs a learned autoregressive selector.',
+  'wh.FlashGaze': 'Prunes once, before the ViT, using pixel differences alone. No auxiliary network.',
+  'wh.lat': 'Latency of different methods',
+  'me.h2': 'Three actions per patch, solved exactly with a Quadtree DP',
+  'me.s1.t': 'Remember what the model has already seen',
+  'me.s1.p': 'A visual memory stores the most recently retained patch at each location. The first frame initializes the memory.',
+  'me.s2.t': 'Price every action in pixels',
+  'me.s2.p': 'The dropping cost is measured by the pixel difference between the current patch and its corresponding historical patch. The merging cost is measured by the pixel difference before and after merging, scaled by the patches covered. Keeping costs nothing.',
+  'me.s3.t': 'Solve with a Quadtree DP',
+  'me.s3.p': 'Fine, mid and coarse patches overlap, so they form a three-level quadtree. A DP finds the cheapest plan for each exact patch count, then picks the count that minimises total cost plus a penalty \u03bb per patch, within the budget.',
+  'me.eq': 'Objective for frame t',
+  'scm.h': 'Subtree Cost Merging (SCM), by hand',
+  'scm.p': 'Four neighbouring fine patches form a mid-scale node. Set what it costs to drop each one and to merge all four into one patch. The chart shows the cheapest way to retain exactly n patches.',
+  'scm.drop': 'Drop cost, patch {i}', 'scm.merge': 'Merge cost, all four', 'scm.n': 'Patches retained, n',
+  'scm.before': 'Split only', 'scm.after': 'With merge option',
+  'scm.r.merge': 'n = 1: merging all four wins ({m} < {k}).',
+  'scm.r.one': 'n = 1: keeping the costliest patch wins ({k} \u2264 {m}).',
+  'scm.r.n': 'n = {n}: drop the {d} cheapest patches. Cost {c}.',
+  'scm.r.n0': 'n = 0: drop all four. Cost {c}.', 'scm.r.n4': 'n = 4: keep all four. Cost 0.',
+  'scm.keep': 'keep', 'scm.dropl': 'drop', 'scm.mergel': 'merged',
+    'ci.h2': 'Citation', 'ci.copy': 'Copy BibTeX', 'ci.copied': 'Copied',
+  'me.vid': 'Method video coming soon',
+  'vis.h2': 'Visualization',
+  'vis.p': 'Pick a clip from the strip to see the original on the left and the FlashGaze result on the right. Dark areas are dropped. The colored boxes indicate the retained patches at different resolutions.',
+  'vis.clip': 'Clip {n} / {total}', 'vis.short': 'Clip {n}', 'vis.empty': 'video coming soon', 'vis.strip': 'Clips', 'vis.prev': 'Previous clips', 'vis.next': 'More clips',
+  'res.h2': 'Faster and Better',
+  'res.long': 'Unlocking Longer Context',
+  'res.t1.cap': 'Comparison with other methods at the same retained ratio. FlashGaze has the highest overall accuracy and the lowest TTFT on every benchmark.',
+  'res.t1.note': '*FastV is omitted for NVILA-8B-Video because its context overflows before pruning.',
+  'res.t3.cap': 'Accuracy, peak GPU memory and TTFT at different retained ratios on Qwen3-VL-8B. FlashGaze has the lowest TTFT and peak memory in every setting. Blue bold marks the best result in each group.',
+  'res.f4.cap': 'Latency across input scales and retained ratios. At a 20% retained ratio with 256 frames at 1,792 px, FlashGaze speeds up ViT encoding by 7.3\u00d7, MLLM prefill by 19.7\u00d7 and TTFT by 15\u00d7.',
+  'img.soon': 'Image coming soon',
+  'res.t2.cap': 'Scalability across benchmarks. FlashGaze lets Qwen3-VL-8B take 1.5K frames at 4K resolution, and it improves on the unpruned model on all six benchmarks.',
+  'tb.method': 'Method', 'tb.ratio': 'Retained ratio', 'tb.acc': 'Acc.', 'tb.mem': 'Peak GPU mem. (GiB)',
+  'tb.model': 'Model', 'tb.frames': 'Max frames', 'tb.res': 'Max res.', 'tb.general': 'General video', 'tb.lv': 'Long video', 'tb.long': 'High-res & long',
+  'ana.h2': 'Analysis',
+  'ana.a.h': 'Preserving Visual Representations',
+  'ana.a.p': 'We compare FlashGaze\'s attention-weighted visual representations with those of the full input on 20 HLVid videos using cosine similarity. FlashGaze maintains highly similar visual representations to the vanilla setting.',
+  'ana.c.alt': 'Visualization of pruned videos',
+  'ana.c.p': 'FlashGaze removes redundant patches in static backgrounds while retaining regions with temporal changes. In dynamic scenes, it allocates coarse-scale patches to low-information areas and fine-scale patches to detail-rich regions.',
+  'ana.b.h': 'More Attention to Dynamic Visual Tokens',
+  'ana.b.p': 'FlashGaze consistently allocates more attention to dynamic tokens than the vanilla model, while improving accuracy from 71.6% to 73.2%, suggesting better utilization of dynamic visual information.',
+  'theme.dark': 'Dark', 'theme.light': 'Light'
+},
+zh: {
+  'doc.title': 'FlashGaze：无需训练的多尺度 Patch 剪枝，实现高效视频理解',
+  'nav.overview': '概览', 'nav.where': '动机', 'nav.method': '方法', 'nav.vis': '可视化', 'nav.results': '实验结果', 'nav.analysis': '分析', 'nav.cite': '引用',
+  'hero.sub': '无需训练的多尺度 Patch 剪枝，让视频理解更高效',
+  'hero.lead': '没变的丢掉，平滑的合并，有细节的保留。这一切都发生在视觉编码器运行之前。',
+  'btn.paper': 'arXiv', 'btn.quick': '快速理解', 'btn.vis': '可视化', 'btn.cite': 'BibTeX',
+  'aff.1': '北京大学', 'aff.2': 'Canva Research', 'aff.3': '中山大学', 'aff.c': '通讯作者',
+  'hero.orig': '原始视频', 'hero.fg': 'FlashGaze', 'hero.play': '播放', 'hero.pause': '暂停',
+  'hero.cap': '拖动分隔线，对比原始视频与 FlashGaze 的剪枝结果。变暗的区域被丢弃，方框标出保留下来的 patch，共有三种尺度。',
+  'leg.keep': '保留', 'leg.mid': '合并 2\u00d7', 'leg.coarse': '合并 4\u00d7', 'leg.drop': '丢弃',
+  'ov.h2': '概览',
+  'abs.h2': '摘要',
+  'abs.p': '多模态大语言模型（MLLM）在视频理解方面已展现出强大的性能，但如何高效处理长且高分辨率的视频仍具挑战。此类视频往往包含大量时空冗余，处理冗余的视觉 token 会带来本可避免的计算开销。许多现有方法在视觉 Transformer（ViT）编码过程中或编码之后剪枝视觉 token，使得大部分编码开销未能得到解决。部分方法虽然在编码之前剪枝 patch，却依赖学习得到的辅助网络来选择 patch，带来额外的训练和推理开销。为解决这些局限，我们提出 FlashGaze，一种无需训练的方法，在 ViT 编码之前削减时空冗余，且不引入辅助网络。FlashGaze 以像素空间差异作为信息损失的代理，并采用四叉树动态规划（Quadtree Dynamic Programming），在固定预算下联合优化 patch 的丢弃、合并与保留。在两种 MLLM 骨干模型、多个基准上的实验表明，该方法在基本保持准确率的同时取得了显著的效率提升。在 Qwen3-VL-8B 上，FlashGaze 在 LongVideoBench 上保留了完整输入基线 98% 的准确率，同时在 ViT 编码和 MLLM 预填充上分别取得最高 5.4\u00d7 和 17\u00d7 的加速，并将峰值 GPU 显存占用降低 1.8 倍。这些效率收益使模型能够在同一 GPU 硬件上处理帧数更多、分辨率更高的视频，让此前难以企及的规模上的视频理解成为可能。',
+  'fig1.cap': '我们提出 FlashGaze，一种无需训练的 patch 剪枝方法。',
+  'fig1.soon': '图 1 即将补充',
+  'ov.b': '仅保留 20% 的 token，LongVideoBench 上仍保有完整输入的准确率',
+  'ov.c': '首 token 延迟加速：ViT 编码 5.4\u00d7，MLLM 预填充 17\u00d7',
+  'ov.d': '峰值显存降低，LongVideoBench 上由 106.4 降至 58.2 GiB',
+  'ov.e': '把 Qwen3-VL-8B 扩展到 1,536 帧、3,840 px，六个基准全部超过未剪枝模型',
+  'wh.h1': '视频中存在大量的时间冗余和空间冗余',
+  'wh.p0': '长且高分辨率的视频会产生海量的视觉 token 序列，带来巨大的计算开销。然而，大量视觉内容是冗余的：静态背景在连续帧之间不断重复，而每帧内部平坦或低纹理的区域所包含的空间信息很少。',
+  'wh.h2': '剪枝越晚，产生的不必要计算就越多',
+  'wh.p': '现有方法在 ViT 内部、ViT 编码之后或 LLM 内部剪枝视觉 token，但这些方法无法消除前面阶段已经产生的计算。学习型 patch 选择器可以更早剪枝，却引入了额外的网络开销。相比之下，直接在视频输入阶段剪枝，可以降低整条流水线的计算量。点击任一行，查看各方法在哪个阶段剪枝。',
+  'st.pre': 'ViT 之前', 'st.vit': 'ViT 编码', 'st.llm': 'MLLM 预填充',
+  'wh.none': '不剪枝', 'wh.vanilla': '不剪枝。所有 token 经过所有阶段。',
+  'wh.ToMe': '在 ViT 内部逐层合并相似 token，所以浅层仍要处理全部 token。',
+  'wh.VisionZip': '压缩 ViT 的输出。此时整个 ViT 已经对全部 token 运行过了。',
+  'wh.FastV': '在 LLM 前几层之后剪枝。ViT 和 LLM 浅层仍处理全部 token。',
+  'wh.AutoGaze': '在 ViT 之前剪枝，但需要一个学习型自回归选择器。',
+  'wh.FlashGaze': '仅在 ViT 之前剪枝一次，只依据像素差异，无需辅助网络。',
+  'wh.lat': '不同方法的延迟',
+  'me.h2': '每个 patch 三种动作，用四叉树 DP 精确求解',
+  'me.s1.t': '记住模型已经看过的内容',
+  'me.s1.p': '视觉记忆在每个位置保存最近一次保留下来的 patch。第一帧用于初始化记忆。',
+  'me.s2.t': '用像素给每种动作定价',
+  'me.s2.p': '丢弃代价由当前 patch 与其对应的历史 patch 之间的像素差异衡量；合并代价由合并前后的像素差异衡量，并按所覆盖的 patch 数缩放；保留的代价为零。',
+  'me.s3.t': '用四叉树 DP 求解',
+  'me.s3.p': '细、中、粗尺度的 patch 相互重叠，因此组织成三层四叉树。DP 为每个确切的 patch 数量求最低代价方案，再在预算内选出使总代价加上每个 patch 的惩罚 \u03bb 最小的数量。',
+  'me.eq': '第 t 帧的优化目标',
+  'scm.h': '手动体验子树代价合并（SCM）',
+  'scm.p': '四个相邻的细粒度 patch 构成一个中等尺度节点。设置丢弃每个 patch 的代价，以及把四个合并成一个 patch 的代价。图中显示恰好保留 n 个 patch 的最低代价方案。',
+  'scm.drop': '丢弃代价，patch {i}', 'scm.merge': '合并代价（四个合一）', 'scm.n': '保留的 patch 数 n',
+  'scm.before': '仅拆分', 'scm.after': '含合并选项',
+  'scm.r.merge': 'n = 1：四个合并更优（{m} < {k}）。',
+  'scm.r.one': 'n = 1：保留代价最高的那个 patch 更优（{k} \u2264 {m}）。',
+  'scm.r.n': 'n = {n}：丢弃代价最低的 {d} 个 patch，代价 {c}。',
+  'scm.r.n0': 'n = 0：四个全部丢弃，代价 {c}。', 'scm.r.n4': 'n = 4：四个全部保留，代价 0。',
+  'scm.keep': '保留', 'scm.dropl': '丢弃', 'scm.mergel': '合并',
+    'ci.h2': '引用', 'ci.copy': '复制 BibTeX', 'ci.copied': '已复制',
+  'me.vid': '方法讲解视频即将上线',
+  'vis.h2': '可视化',
+  'vis.p': '点击下方任一片段，左边是原始视频，右边是 FlashGaze 的结果。变暗的区域被丢弃，彩色方框表示不同分辨率下保留的 patch。',
+  'vis.clip': '片段 {n} / {total}', 'vis.short': '片段 {n}', 'vis.empty': '视频即将上线', 'vis.strip': '片段列表', 'vis.prev': '上一页', 'vis.next': '更多片段',
+  'res.h2': '更快，也更好',
+  'res.long': '解锁更长的上下文',
+  'res.t1.cap': '在相同保留比例下与其他方法对比。FlashGaze 在每个基准上都取得最高的整体准确率和最低的 TTFT。',
+  'res.t1.note': '*NVILA-8B-Video 未包含 FastV：剪枝之前上下文就已溢出。',
+  'res.t3.cap': 'Qwen3-VL-8B 在不同保留比例下的准确率、峰值显存和 TTFT。FlashGaze 在每种设置下的 TTFT 和峰值显存都最低。蓝色粗体表示每组中的最优结果。',
+  'res.f4.cap': '不同输入规模和保留比例下的延迟。保留 20%、256 帧、1,792 px 时，FlashGaze 在 ViT 编码、MLLM 预填充和 TTFT 上分别加速 7.3\u00d7、19.7\u00d7 和 15\u00d7。',
+  'img.soon': '图片即将补充',
+  'res.t2.cap': '跨基准的扩展能力。FlashGaze 让 Qwen3-VL-8B 可以处理 1.5K 帧、4K 分辨率的视频，并在六个基准上全部超过未剪枝的模型。',
+  'tb.method': '方法', 'tb.ratio': '保留比例', 'tb.acc': '准确率', 'tb.mem': '峰值显存 (GiB)',
+  'tb.model': '模型', 'tb.frames': '最大帧数', 'tb.res': '最大分辨率', 'tb.general': '通用视频', 'tb.lv': '长视频', 'tb.long': '高分辨率与长视频',
+  'ana.h2': '分析',
+  'ana.a.h': '保留视觉表征',
+  'ana.a.p': '我们在 20 个 HLVid 视频上，用余弦相似度比较FlashGaze注意力加权视觉表征与完整输入的视觉表征。FlashGaze 保持了与原始设置高度相似的视觉表征。',
+  'ana.c.alt': '剪枝后视频的可视化',
+  'ana.c.p': 'FlashGaze 去除静态背景中的冗余 patch，同时保留发生时间变化的区域。在动态场景中，它为低信息区域分配粗尺度 patch，为细节丰富的区域分配细尺度 patch。',
+  'ana.b.h': '对动态视觉 token 的更多关注',
+  'ana.b.p': 'FlashGaze 始终比原始模型为动态 token 分配更多注意力，同时将准确率从 71.6% 提升到 73.2%，表明它更好地利用了动态视觉信息。',
+  'theme.dark': '深色', 'theme.light': '浅色'
+}};
+
+/* Tiny SVG helpers */
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs, ...kids) {
+  const e = document.createElementNS(NS, tag);
+  if (attrs) for (const k in attrs) if (attrs[k] != null) e.setAttribute(k, attrs[k]);
+  kids.flat().forEach(k => { if (k != null) e.append(k.nodeType ? k : document.createTextNode(String(k))); });
+  return e;
+}
+const clear = n => { while (n.firstChild) n.removeChild(n.firstChild); return n; };
+const halo = 'paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round';
+
+/* =====================================================================
+   Results: Tables 1-3 (numbers copied from the paper), rendered as HTML tables.
+   Bold + blue = best value in its column (or group).  Rows of FlashGaze get a bolt and a tint.
+   ===================================================================== */
+const UP = '<svg class="arr" viewBox="0 0 10 12" aria-label="higher is better"><path d="M5 11V2M1.5 5.5 5 2l3.5 3.5"/></svg>';
+const DOWN = '<svg class="arr" viewBox="0 0 10 12" aria-label="lower is better"><path d="M5 1v9M1.5 6.5 5 10l3.5-3.5"/></svg>';
+const BOLT = '<svg class="tbolt" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 1.5 4.5 13.5h6.2l-1.6 9L19.5 10h-6.3z"/></svg>';
+
+/* Table 1. 11 numbers per row: LongVideoBench [Perc., Relat., Overall, TTFT] | VideoMMMU [Perc., Comp., Adapt., Overall, TTFT] | HLVid [Overall, TTFT] */
+const R_T1_KIND = ['a', 'a', 'a', 't', 'a', 'a', 'a', 'a', 't', 'a', 't'];       // a = accuracy (higher is better), t = TTFT (lower is better)
+const R_T1 = [
+  { name: 'Qwen3-VL-8B', rows: [
+    ['ToMe',      [73.2, 60.4, 66.4, 24.3, 78.0, 69.0, 48.3, 65.1, 23.7, 71.6, 25.7]],
+    ['FastV',     [72.8, 60.4, 66.2, 28.7, 79.6, 67.0, 50.7, 65.8, 28.2, 70.9, 30.1]],
+    ['VisionZip', [72.6, 60.3, 66.0, 25.4, 79.0, 68.3, 49.0, 65.4, 24.6, 71.2, 27.5]],
+    ['FlashVID',  [72.0, 59.7, 65.4, 26.5, 77.3, 64.7, 49.3, 63.8, 25.8, 72.3, 28.9]],
+    ['AutoGaze',  [72.0, 60.3, 65.8, 34.9, 77.7, 69.7, 47.7, 65.0, 37.2, 69.8, 34.6]],
+    ['FlashGaze', [72.3, 61.8, 66.7, 20.7, 80.9, 71.3, 48.7, 67.0, 20.4, 73.2, 20.5]] ] },
+  { name: 'NVILA-8B-Video*', rows: [
+    ['ToMe',      [61.1, 48.0, 54.2, 30.7, 46.7, 34.7, 41.0, 40.8, 29.4, 49.6, 58.0]],
+    ['VisionZip', [61.3, 47.3, 53.9, 34.9, 43.3, 34.0, 41.3, 39.6, 32.8, 49.3, 65.4]],
+    ['FlashVID',  [61.4, 48.9, 54.8, 38.9, 45.3, 37.3, 38.0, 40.2, 42.4, 52.6, 77.4]],
+    ['AutoGaze',  [65.4, 53.4, 58.8, 17.5, 53.0, 36.3, 42.7, 44.0, 15.9, 49.3, 32.2]],
+    ['FlashGaze', [65.8, 53.0, 59.0, 13.7, 52.3, 38.0, 42.7, 44.3, 13.6, 53.0, 27.3]] ] }
+];
+
+/* Table 3. [accuracy, peak GPU memory (GiB), TTFT (s)] per method, per retained ratio */
+const R_T3 = {
+  'LongVideoBench': { base: [66.7, 106.4, 71.7], g: [
+    [50, { ToMe: [66.4, 82.5, 24.3], FlashVID: [65.4, 101.2, 26.5], AutoGaze: [65.8, 81.0, 34.9], FlashGaze: [66.7, 80.6, 20.7] }],
+    [40, { ToMe: [66.6, 82.5, 18.6], FlashVID: [64.9, 101.2, 20.7], AutoGaze: [65.7, 74.0, 25.3], FlashGaze: [66.7, 73.1, 14.5] }],
+    [30, { ToMe: [65.9, 82.5, 13.8], FlashVID: [64.4, 101.2, 16.0], AutoGaze: [65.1, 65.5, 18.2], FlashGaze: [66.3, 65.2, 9.5] }],
+    [20, { ToMe: [65.1, 82.5, 10.3], FlashVID: [63.6, 101.2, 12.2], AutoGaze: [64.1, 59.0, 12.1], FlashGaze: [65.5, 58.2, 5.4] }] ] },
+  'HLVid': { base: [71.6, 105.6, 72.3], g: [
+    [50, { ToMe: [71.6, 82.3, 25.7], FlashVID: [72.3, 101.0, 28.9], AutoGaze: [69.8, 80.2, 34.6], FlashGaze: [73.2, 80.0, 20.5] }],
+    [40, { ToMe: [71.2, 82.3, 20.0], FlashVID: [71.3, 101.0, 23.0], AutoGaze: [68.2, 72.9, 25.4], FlashGaze: [71.3, 72.4, 14.3] }],
+    [30, { ToMe: [71.6, 82.5, 15.4], FlashVID: [71.6, 101.2, 18.2], AutoGaze: [66.7, 65.5, 19.0], FlashGaze: [71.7, 65.2, 9.1] }],
+    [20, { ToMe: [67.9, 82.3, 12.1], FlashVID: [70.9, 101.0, 14.8], AutoGaze: [54.9, 58.4, 13.5], FlashGaze: [68.2, 58.0, 5.3] }] ] }
+};
+
+/* Table 2. [VideoMME, NExT-QA, VideoMMMU, LongVideoBench, MLVU, HLVid]; null = not reported */
+const R_T2_COLS = [['VideoMME', 'w/o sub'], ['NExT-QA', 'mc'], ['VideoMMMU', 'overall'], ['LongVideoBench', 'overall'], ['MLVU', 'm-avg'], ['HLVid', 'test']];
+const R_T2_GROUPS = [['tb.general', 2], ['tb.lv', 3], ['tb.long', 1]];   // [label key, number of columns]
+const R_T2_GL = [0, 2, 5];   // first column of each group
+const R_T2 = [
+  ['LLaVA-OV-8B', 32, 384, [58.2, 79.4, null, 56.5, 64.7, 41.1]],
+  ['LLaVA-Video-7B', 64, 384, [63.3, 83.2, 36.1, 58.2, 70.8, null]],
+  ['VideoLLaMA3-7B', 180, 384, [66.2, 84.5, 47.0, 59.8, 73.0, 38.8]],
+  ['InternVL3.5-8B', 64, 448, [66.0, null, null, 62.1, 70.2, 39.9]],
+  ['VideoChat-Flash', 10000, 448, [65.3, null, 41.7, 64.7, 74.7, 46.6]],
+  ['LongVILA-7B', 2048, 384, [60.1, 80.7, null, 57.1, null, 41.4]],
+  ['NVILA-8B-Video', 256, 448, [64.2, 82.2, null, 57.7, 70.1, 42.5]],
+  ['Qwen2.5-VL-7B', 48, 896, [65.1, null, 47.4, 56.0, 70.2, 48.1]],
+  ['Qwen3-VL-8B', 768, 1792, [71.5, 83.6, 65.3, 66.7, 77.3, 71.6]],
+  ['+ FlashGaze', 1536, 3840, [71.8, 84.7, 67.0, 66.9, 77.6, 73.2], true]
+];
+
+/* ---------- rendering helpers ---------- */
+const f1 = v => v == null ? '\u2013' : v.toFixed(1);
+const isUs = n => /FlashGaze$/.test(n);   // 'FlashGaze', '+FlashGaze' and '+ FlashGaze'
+const nameCell = n => `<td class="m">${isUs(n) ? BOLT : ''}${n}</td>`;
+const best = (vals, kind) => { const v = vals.filter(x => x != null); return kind === 't' ? Math.min(...v) : Math.max(...v); };
+const cell = (v, b, extra = '') => `<td class="${(v === b ? 'best ' : '') + extra}">${f1(v)}</td>`;
+
+function renderT1() {
+  const grp = [['LongVideoBench', 4, 'Perception / Relation'], ['VideoMMMU', 5, 'Perception / Comprehension / Adaptation'], ['HLVid', 2, '']];
+  let h = `<thead><tr><th rowspan="2" class="m">${t('tb.method')}</th>${grp.map(([n, c], i) => `<th colspan="${c}" class="grp${i ? ' gl' : ''}">${n}</th>`).join('')}</tr><tr>` +
+    [['Perc.', 'Perception'], ['Relat.', 'Relation'], ['Overall' + UP, ''], ['TTFT (s)' + DOWN, 'Time to first token'], ['Perc.', 'Perception'], ['Comp.', 'Comprehension'], ['Adapt.', 'Adaptation'], ['Overall' + UP, ''], ['TTFT (s)' + DOWN, 'Time to first token'], ['Overall' + UP, ''], ['TTFT (s)' + DOWN, 'Time to first token']]
+      .map(([a, b], i) => `<th${b ? ` title="${b}"` : ''}${[0, 4, 9].includes(i) ? ' class="gl"' : ''}>${a}</th>`).join('') + '</tr></thead><tbody>';
+  for (const blk of R_T1) {
+    h += `<tr class="sec"><td colspan="12">${blk.name}</td></tr>`;
+    const bests = R_T1_KIND.map((k, i) => best(blk.rows.map(r => r[1][i]), k));
+    for (const [n, v] of blk.rows) h += `<tr class="${isUs(n) ? 'us' : ''}">${nameCell('+' + n)}${v.map((x, i) => cell(x, bests[i], [0, 4, 9].includes(i) ? 'gl' : '')).join('')}</tr>`;
+  }
+  return h + '</tbody>';
+}
+function renderT3() {
+  const names = Object.keys(R_T3), ratios = R_T3[names[0]].g.map(x => x[0]);
+  const sub = i => `<th${i === 0 ? ' class="gl"' : ''}>${[t('tb.acc') + UP, t('tb.mem') + DOWN, 'TTFT (s)' + DOWN][i]}</th>`;
+  let h = `<thead><tr><th rowspan="2" class="m">${t('tb.method')}</th><th rowspan="2">${t('tb.ratio')}</th>${names.map(n => `<th colspan="3" class="grp gl">${n}</th>`).join('')}</tr><tr>${names.map(() => [0, 1, 2].map(sub).join('')).join('')}</tr></thead><tbody>`;
+  h += `<tr class="base"><td class="m">Qwen3-VL-8B</td><td>100%</td>${names.map(n => R_T3[n].base.map((v, i) => `<td${i === 0 ? ' class="gl"' : ''}>${f1(v)}</td>`).join('')).join('')}</tr>`;
+  ratios.forEach((ratio, gi) => {
+    const mnames = Object.keys(R_T3[names[0]].g[gi][1]);
+    // best value per benchmark and metric within this retained ratio
+    const bests = names.map(n => { const rows = R_T3[n].g[gi][1]; return [0, 1, 2].map(i => best(mnames.map(m => rows[m][i]), i === 0 ? 'a' : 't')); });
+    mnames.forEach((m, k) => {
+      h += `<tr class="${isUs(m) ? 'us' : ''}${k === 0 ? ' top' : ''}">${nameCell('+' + m)}${k === 0 ? `<td class="rr" rowspan="${mnames.length}">${ratio}%</td>` : ''}` +
+        names.map((n, bi) => R_T3[n].g[gi][1][m].map((v, i) => cell(v, bests[bi][i], i === 0 ? 'gl' : '')).join('')).join('') + '</tr>';
+    });
+  });
+  return h + '</tbody>';
+}
+function renderT2() {
+  let h = `<thead><tr><th rowspan="2" class="m">${t('tb.model')}</th><th rowspan="2">${t('tb.frames')}</th><th rowspan="2">${t('tb.res')}</th>${R_T2_GROUPS.map(([k, c]) => `<th colspan="${c}" class="grp gl">${t(k)}</th>`).join('')}</tr><tr>` +
+    R_T2_COLS.map(([a, b], i) => `<th${R_T2_GL.includes(i) ? ' class="gl"' : ''}>${a}<small>${b}</small></th>`).join('') + '</tr></thead><tbody>';
+  const bests = R_T2_COLS.map((_, i) => best(R_T2.map(r => r[3][i]), 'a'));
+  for (const [n, fr, rs, v, us] of R_T2) h += `<tr class="${us ? 'us' : ''}${n === 'Qwen3-VL-8B' ? ' base' : ''}">${nameCell(n)}<td>${fr}</td><td>${rs}</td>${v.map((x, i) => cell(x, bests[i], R_T2_GL.includes(i) ? 'gl' : '')).join('')}</tr>`;
+  return h + '</tbody>';
+}
+function renderResults() {
+  $('#tblT1').innerHTML = renderT1();
+  $('#tblT3').innerHTML = renderT3();
+  $('#tblT2').innerHTML = renderT2();
+}
+
+/* =====================================================================
+   UI: i18n, theme, hero, pipeline, SCM widget, playground, results
+   ===================================================================== */
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+let lang = store.get('fg-lang') || ((navigator.language || 'en').toLowerCase().startsWith('zh') ? 'zh' : 'en');
+let theme = store.get('fg-theme') || 'dark';
+const t = (k, v) => { let s = (I18N[lang] && I18N[lang][k]) ?? I18N.en[k] ?? k; if (v) s = s.replace(/\{(\w+)\}/g, (_, n) => v[n] ?? ''); return s; };
+const refreshers = [];
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function applyTheme() { document.documentElement.dataset.theme = theme; $('#themeBtn').textContent = theme === 'dark' ? t('theme.light') : t('theme.dark'); }
+function applyLang() {
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en'; document.title = t('doc.title');
+  $$('[data-i18n]').forEach(e => e.textContent = t(e.dataset.i18n));
+  $$('[data-i18n-html]').forEach(e => e.innerHTML = t(e.dataset.i18nHtml));
+  $('#langBtn').textContent = lang === 'zh' ? 'EN' : '\u4e2d\u6587';
+  $('#themeBtn').textContent = theme === 'dark' ? t('theme.light') : t('theme.dark');
+  refreshers.forEach(f => f());
+}
+$('#langBtn').addEventListener('click', () => { lang = lang === 'zh' ? 'en' : 'zh'; store.set('fg-lang', lang); applyLang(); });
+$('#themeBtn').addEventListener('click', () => { theme = theme === 'dark' ? 'light' : 'dark'; store.set('fg-theme', theme); applyTheme(); refreshers.forEach(f => f()); });
+
+/* ---------------- links ---------------- */
+(function () { $('#lnkPaper').href = SITE.links.paper; })();
+
+const ICON = {
+  pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/></svg>',
+  play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.500v13l11-6.500z" fill="currentColor"/></svg>'
+};
+/* a Play/Pause button: icon + text; `playing` = true shows the Pause state */
+function setPlayButton(btn, playing) { btn.innerHTML = (playing ? ICON.pause : ICON.play) + '<span></span>'; $('span', btn).textContent = playing ? t('hero.pause') : t('hero.play'); btn.setAttribute('aria-pressed', String(playing)); }
+
+/* ---------------- two videos played in sync (hero + visualize) ---------------- */
+const pairs = [];
+/* Keep b aligned with a.
+   - small drift: nudge b's playback rate by up to 10% (invisible, no seek stutter)
+   - larger drift: seek b once, aiming ahead by the seek latency we measured, then wait before seeking again. */
+setInterval(() => {
+  const now = performance.now();
+  for (const p of pairs) {
+    const { a, b } = p; if (a === b) continue;
+    if (a.paused || b.paused) { if (b.playbackRate !== 1) b.playbackRate = 1; continue; }
+    const d = a.currentTime - b.currentTime;                       // > 0: b is behind
+    if (Math.abs(d) > .2 && now - p.lastSeek > 1200) { p.lastSeek = now; b.currentTime = a.currentTime + p.lat; b.playbackRate = 1; }
+    else if (Math.abs(d) > .03) b.playbackRate = 1 + Math.max(-.1, Math.min(.1, d * .6));
+    else if (b.playbackRate !== 1) b.playbackRate = 1;
+  }
+}, 150);
+/* Register two <video>s so their drift is corrected by the loop above. */
+function registerPair(a, b) {
+  const rec = { a, b, lat: .15, lastSeek: 0, t0: 0 }; pairs.push(rec);
+  if (a !== b) {
+    b.addEventListener('seeking', () => { rec.t0 = performance.now(); });
+    b.addEventListener('seeked', () => { if (rec.t0) rec.lat = Math.min(.6, Math.max(.03, .5 * rec.lat + .5 * (performance.now() - rec.t0) / 1000)); });
+  }
+  return rec;
+}
+/* a, b: <video> elements with identical length and frame rate (b may equal a for a single clip).
+   Plays only while `target` is visible and `want` is true. */
+function pairPlayer(a, b, target, want) {
+  let inView = false;
+  const ready = v => new Promise(r => v.readyState >= 3 ? r() : v.addEventListener('canplay', r, { once: true }));
+  async function play() { try { if (a !== b && Math.abs(a.currentTime - b.currentTime) > .05) b.currentTime = a.currentTime; await Promise.all(a === b ? [a.play()] : [a.play(), b.play()]); } catch (e) { /* autoplay blocked: stays paused */ } }
+  function pause() { a.pause(); if (b !== a) { b.pause(); b.playbackRate = 1; } }
+  const update = () => (want && inView) ? play() : pause();
+  registerPair(a, b);
+  new IntersectionObserver(es => { inView = es[0].isIntersecting; update(); }, { threshold: .15 }).observe(target);
+  Promise.all([ready(a), ready(b)]).then(() => { a.currentTime = b.currentTime = 0; update(); });
+  return { setWant(v) { want = v; update(); } };
+}
+
+/* ---------------- hero: original vs FlashGaze, draggable divider ---------------- */
+function initHero() {
+  const box = $('#heroFinder'), vc = $('#vcmp'), a = $('#vOri'), b = $('#vFg'), split = $('#heroSplit'), btn = $('#heroPlay');
+  const pp = pairPlayer(a, b, vc, !reduced);
+  const label = () => setPlayButton(btn, !a.paused);
+  btn.addEventListener('click', () => pp.setWant(a.paused));
+  ['play', 'pause'].forEach(ev => a.addEventListener(ev, label));
+  const setSplit = v => box.style.setProperty('--split', v + '%');
+  const drag = e => { const r = vc.getBoundingClientRect(), v = Math.min(100, Math.max(0, (e.clientX - r.left) / r.width * 100)); split.value = v; setSplit(v); };
+  vc.addEventListener('pointerdown', e => { vc.setPointerCapture(e.pointerId); drag(e); });
+  vc.addEventListener('pointermove', e => { if (vc.hasPointerCapture(e.pointerId)) drag(e); });
+  split.addEventListener('input', () => setSplit(split.value));
+  refreshers.push(label); label();
+}
+
+/* ---------------- visualize: big Original | FlashGaze pair + strip of small previews ---------------- */
+function initVisualize() {
+  const items = SITE.visualize || [], total = items.length, strip = $('#vStrip'), prev = $('#vPrev'), next = $('#vNext');
+  const slots = [[$('#vsOri'), 'ori'], [$('#vsFg'), 'fg']].map(([el, k]) => ({ el, k, v: $('video', el) }));
+  let cur = -1, inView = false, armed = false, token = 0, active = [];
+  registerPair(slots[0].v, slots[1].v);
+  const ready = v => new Promise(r => v.readyState >= 3 ? r() : v.addEventListener('canplay', r, { once: true }));
+  const update = () => active.forEach(v => inView ? v.play().catch(() => {}) : v.pause());
+  const caption = it => (it.cap && (it.cap[lang] || it.cap.en)) || '';
+
+  // thumbnails: small Original previews
+  items.forEach((it, i) => {
+    const th = document.createElement('button'); th.type = 'button'; th.className = 'vthumb' + (it.ori ? '' : ' empty'); th.setAttribute('role', 'tab'); th.dataset.i = i;
+    th.innerHTML = '<span class="tv"></span><span class="tn"></span><span class="tl"></span>';
+    $('.tn', th).textContent = String(i + 1).padStart(2, '0');
+    if (it.ori) {
+      const v = document.createElement('video'); v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'none'; v.disablePictureInPicture = true; v.tabIndex = -1; v.dataset.src = it.ori;
+      $('.tv', th).append(v);
+      if (!reduced) {   // hover to preview (mouse only)
+        th.addEventListener('pointerenter', e => { if (e.pointerType !== 'mouse') return; v.play().catch(() => {}); });
+        th.addEventListener('pointerleave', () => { v.pause(); try { v.currentTime = .1; } catch (e) {} });
+      }
+    }
+    th.addEventListener('click', () => select(i, true));
+    th.addEventListener('keydown', e => {
+      const d = { ArrowRight: 1, ArrowLeft: -1 }[e.key], n = e.key === 'Home' ? 0 : e.key === 'End' ? total - 1 : d != null ? Math.min(total - 1, Math.max(0, cur + d)) : null;
+      if (n == null) return; e.preventDefault(); select(n, true); $$('.vthumb', strip)[n].focus();
+    });
+    strip.append(th);
+  });
+
+  function render(i) {                      // everything except loading video data
+    cur = i; const it = items[i];
+    slots.forEach(s => s.el.classList.toggle('empty', !it[s.k]));
+    $$('.vthumb', strip).forEach((th, k) => { th.setAttribute('aria-selected', String(k === i)); th.tabIndex = k === i ? 0 : -1; });
+    text();
+  }
+  function loadClip(i) {                    // assign sources and start both videos together
+    const it = items[i], my = ++token; active = [];
+    slots.forEach(s => {
+      const src = it[s.k]; s.v.pause();
+      if (src) { s.v.hidden = false; s.v.preload = 'auto'; s.v.src = src; active.push(s.v); }
+      else { s.v.hidden = true; s.v.removeAttribute('src'); s.v.load(); }
+    });
+    Promise.all(active.map(ready)).then(() => { if (my !== token) return; active.forEach(v => { v.currentTime = 0; }); update(); });
+  }
+  function select(i, user) {
+    if (i === cur) return; render(i); if (armed) loadClip(i);
+    if (user) { const th = $$('.vthumb', strip)[i]; strip.scrollTo({ left: th.offsetLeft - (strip.clientWidth - th.offsetWidth) / 2, behavior: reduced ? 'auto' : 'smooth' }); }
+  }
+  function text() {
+    if (cur < 0) return; const it = items[cur], n = String(cur + 1).padStart(2, '0');
+    $('#vCount').textContent = t('vis.clip', { n, total }); $('#vCap').textContent = caption(it);
+    strip.setAttribute('aria-label', t('vis.strip')); prev.setAttribute('aria-label', t('vis.prev')); next.setAttribute('aria-label', t('vis.next'));
+    $$('.vthumb', strip).forEach((th, k) => {
+      const c = caption(items[k]), nn = String(k + 1).padStart(2, '0'), name = t('vis.short', { n: nn });
+      $('.tl', th).textContent = c || name; th.setAttribute('aria-label', c ? `${name}: ${c}` : name);
+    });
+    slots.forEach(s => { const who = t(s.k === 'fg' ? 'hero.fg' : 'hero.orig'); if (s.el.classList.contains('empty')) { s.el.setAttribute('role', 'img'); s.el.setAttribute('aria-label', `${who}, ${t('vis.empty')}`); } else { s.el.removeAttribute('role'); s.el.setAttribute('aria-label', who); } });
+  }
+
+  // strip arrows
+  const nav = () => { const max = strip.scrollWidth - strip.clientWidth; prev.hidden = strip.scrollLeft < 8; next.hidden = strip.scrollLeft > max - 8; };
+  strip.addEventListener('scroll', nav, { passive: true }); addEventListener('resize', nav); nav();
+  prev.addEventListener('click', () => strip.scrollBy({ left: -strip.clientWidth * .8, behavior: reduced ? 'auto' : 'smooth' }));
+  next.addEventListener('click', () => strip.scrollBy({ left: strip.clientWidth * .8, behavior: reduced ? 'auto' : 'smooth' }));
+
+  // load video data only when the section is near the viewport; play only while it is on screen
+  const stage = $('#vstage');
+  new IntersectionObserver((es, o) => { if (es[0].isIntersecting) { o.disconnect(); armed = true; loadClip(cur);
+    $$('.vthumb video', strip).forEach(v => { v.preload = 'metadata'; v.src = v.dataset.src + '#t=0.1'; }); nav(); } }, { rootMargin: '600px 0px' }).observe(stage);
+  new IntersectionObserver(es => { inView = es[0].isIntersecting; update(); }, { threshold: .25 }).observe($('.vmain', stage));
+
+  render(0); nav();
+  refreshers.push(() => { text(); nav(); });
+}
+
+/* ---------------- where to prune ---------------- */
+const STAGE_B = [0, .20, .47, 1];                     // Pre-ViT | ViT encoder | MLLM prefill
+/* Schematic seconds per stage [ViT, MLLM prefill], loosely after paper Table 5 (Qwen3-VL-8B, LongVideoBench, 50% retained).
+   Pruning methods share one prefill length, except FastV, which prunes inside the LLM. Pre-ViT is drawn the same short length for everyone except
+   AutoGaze, whose learned selector fills that column. */
+const PIPE = [
+  ['vanilla', 5.9, 65.1],
+  ['FastV', 5.9, 23.0],
+  ['VisionZip', 5.9, 17.5],
+  ['ToMe', 4.3, 17.5],
+  ['AutoGaze', 2.0, 17.5],
+  ['FlashGaze', 2.0, 17.5]
+];
+const PRE_SHORT = .08;                                // Pre-ViT bar length, as a fraction of its column
+let pipeSel = 'FlashGaze';
+function buildPipe() {
+  const box = $('#pipe'), W = 900, L = 138, R = 20, RH = 50, T0 = 38, H = T0 + PIPE.length * RH + 6, x = v => L + v * (W - L - R), BH = 22, GAP = 4;
+  box.innerHTML = ''; box.classList.add('has-sel');
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'group', 'aria-label': t('wh.h2') }); box.append(svg);
+  [['st.pre', 0], ['st.vit', 1], ['st.llm', 2]].forEach(([k, i]) => {
+    const a = STAGE_B[i], b = STAGE_B[i + 1];
+    svg.append(el('rect', { x: x(a), y: 4, width: x(b) - x(a), height: H - 10, style: `fill:${i % 2 ? 'transparent' : 'var(--tint)'}` }));
+    svg.append(el('text', { x: (x(a) + x(b)) / 2, y: 24, 'text-anchor': 'middle', class: 'seg' }, t(k)));
+  });
+  STAGE_B.forEach((v, i) => svg.append(el('line', { class: i ? 'sline dash' : 'sline', x1: x(v), x2: x(v), y1: T0 - 4, y2: H - 6 })));
+  // bar of `frac` (0..1) of stage column `i`, starting at the column's left edge
+  const bar = (i, frac, cls, cy) => {
+    const x0 = x(STAGE_B[i]) + GAP, w = Math.max(2, frac * (x(STAGE_B[i + 1]) - x(STAGE_B[i]) - 2 * GAP));
+    return el('rect', { class: cls, x: x0, y: cy - BH / 2, width: w, height: BH });
+  };
+  const vitMax = Math.max(...PIPE.map(r => r[1])), llmMax = Math.max(...PIPE.map(r => r[2]));
+  PIPE.forEach(([key, vit, llm], i) => {
+    const cy = T0 + i * RH + RH / 2;
+    const g = el('g', { class: 'row' + (key === pipeSel ? ' on' : ''), tabindex: 0, role: 'button', 'aria-pressed': key === pipeSel, 'aria-label': key === 'vanilla' ? t('wh.none') : key });
+    g.append(el('rect', { class: 'hit', x: 0, y: cy - RH / 2, width: W, height: RH }));
+    g.append(bar(0, key === 'AutoGaze' ? 1 : PRE_SHORT, 'b-pre', cy), bar(1, vit / vitMax, 'b-vit', cy), bar(2, llm / llmMax, 'b-llm', cy));
+    const us = key === 'FlashGaze', label = el('text', { x: L - 14, y: cy + (us ? 6 : 5), 'text-anchor': 'end', class: 'rname' + (us ? ' us' : '') }, key === 'vanilla' ? t('wh.none') : key);
+    g.append(label);
+    if (us) {   // lightning bolt to the left of the label, placed from the real text width (re-placed once web fonts have loaded)
+      const bolt = el('path', { class: 'rbolt', d: 'M14 1.5 4.5 13.5h6.2l-1.6 9L19.5 10h-6.3z' }); g.append(bolt);
+      const place = () => { const bb = label.getBBox(); bolt.setAttribute('transform', `translate(${(bb.x - 8 - 15 - 4.5).toFixed(1)} ${cy - 12})`); };
+      place(); if (document.fonts && document.fonts.ready) document.fonts.ready.then(place);
+    }
+    const pick = () => { pipeSel = key; buildPipe(); $(`#pipe .row.on`).focus({ preventScroll: true }); };
+    g.addEventListener('click', pick);
+    g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+    svg.append(g);
+  });
+  $('#pipeCap').innerHTML = `<strong>${pipeSel === 'vanilla' ? t('wh.none') : pipeSel}.</strong> ${t('wh.' + pipeSel)}`;
+}
+
+/* ---------------- SCM widget ---------------- */
+const scm = { c: [0.05, 0.32, 0.12, 0.48], m: 0.30, n: 1 };
+function buildScm() {
+  const box = $('#scmSliders'); box.innerHTML = '';
+  const add = (id, label, min, max, v, set) => {
+    const d = document.createElement('div'); d.className = 'ctl';
+    d.innerHTML = `<div class="lab"><span>${label}</span><span class="v"></span></div><input type="range" id="${id}" min="${min}" max="${max}" step="0.01" value="${v}" aria-label="${label}">`;
+    box.append(d); const inp = $('input', d), vv = $('.v', d); vv.textContent = (+v).toFixed(2);
+    inp.addEventListener('input', () => { set(+inp.value); vv.textContent = (+inp.value).toFixed(2); renderScm(); });
+  };
+  scm.c.forEach((v, i) => add('scmc' + i, t('scm.drop', { i: i + 1 }), 0, 0.6, v, x => scm.c[i] = x));
+  add('scmm', t('scm.merge'), 0, 1.5, scm.m, x => scm.m = x);
+}
+function renderScm() {
+  const order = scm.c.map((v, i) => [v, i]).sort((a, b) => a[0] - b[0]);
+  const Tt = [0, 1, 2, 3, 4].map(n => order.slice(0, 4 - n).reduce((s, [v]) => s + v, 0));
+  const mergeWins = scm.m < Tt[1], T = Tt.slice(); if (mergeWins) T[1] = scm.m;
+  const n = scm.n; $('#scmNv').textContent = n;
+  // 2x2 grid
+  const g = clear($('#scmGrid')), cell = 76, pos = [[4, 4], [84, 4], [4, 84], [84, 84]];
+  g.append(el('defs', null, el('pattern', { id: 'hx', width: 7, height: 7, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' }, el('rect', { width: 7, height: 7, style: 'fill:var(--surface)' }), el('rect', { width: 2, height: 7, style: 'fill:var(--drop)' }))));
+  const keepSet = new Set(order.slice(4 - n).map(o => o[1])), merged = n === 1 && mergeWins;
+  if (merged) {
+    g.append(el('rect', { x: 4, y: 4, width: 156, height: 156, style: 'fill:var(--a-m2);fill-opacity:.3;stroke:var(--a-m2);stroke-width:3' }));
+    g.append(el('path', { d: 'M82 4V160M4 82H160', style: 'stroke:var(--a-m2);stroke-width:1.5;stroke-dasharray:4 4' }));
+    g.append(el('text', { x: 82, y: 88, 'text-anchor': 'middle', style: 'fill:var(--ink);font:800 16px var(--font-display)' }, t('scm.mergel')));
+  } else pos.forEach(([px, py], i) => {
+    const k = keepSet.has(i);
+    g.append(el('rect', { x: px, y: py, width: cell, height: cell, style: k ? 'fill:var(--a-keep)' : 'fill:url(#hx);stroke:var(--drop);stroke-width:1.5' }));
+    g.append(el('text', { x: px + cell / 2, y: py + cell / 2 - 2, 'text-anchor': 'middle', style: `fill:${k ? '#fff' : 'var(--ink)'};font:700 14px var(--font-display);${k ? '' : halo}` }, k ? t('scm.keep') : t('scm.dropl')));
+    g.append(el('text', { x: px + cell / 2, y: py + cell / 2 + 16, 'text-anchor': 'middle', style: `fill:${k ? '#fff' : 'var(--ink2)'};font:500 12px var(--font-display);${k ? '' : halo}` }, k ? '0.00' : scm.c[i].toFixed(2)));
+  });
+  // chart
+  const c = clear($('#scmChart')), W = 440, base = 140, top = 26, mx = Math.max(...Tt, scm.m, .2) * 1.08, y = v => base - v / mx * (base - top), gw = 76, x0 = 36;
+  c.append(el('line', { x1: 12, x2: W - 8, y1: base, y2: base, style: 'stroke:var(--ink3);stroke-width:1.2' }));
+  for (let k = 0; k <= 4; k++) {
+    const gx = x0 + k * gw, sel = k === n;
+    const hit = el('rect', { x: gx - 34, y: 6, width: 68, height: base + 30, style: `fill:${sel ? 'var(--tint)' : 'transparent'};cursor:pointer` });
+    hit.addEventListener('click', () => { scm.n = k; $('#scmN').value = k; renderScm(); }); c.append(hit);
+    const win = k === 1 && mergeWins;
+    c.append(el('rect', { x: gx - 25, y: y(Tt[k]), width: 23, height: Math.max(1.5, base - y(Tt[k])), style: 'fill:var(--ink3);fill-opacity:.55;pointer-events:none' }));
+    c.append(el('rect', { x: gx + 2, y: y(T[k]), width: 23, height: Math.max(1.5, base - y(T[k])), style: `fill:${win ? 'var(--a-m2)' : 'var(--keep)'};pointer-events:none` }));
+    c.append(el('text', { x: gx - 13, y: y(Tt[k]) - 5, 'text-anchor': 'middle', style: 'fill:var(--ink3);font:500 11px var(--font-display);pointer-events:none' }, Tt[k].toFixed(2)));
+    c.append(el('text', { x: gx + 14, y: y(T[k]) - 5, 'text-anchor': 'middle', style: `fill:${win ? 'var(--ink)' : 'var(--keep)'};font:700 11.5px var(--font-display);pointer-events:none` }, T[k].toFixed(2)));
+    c.append(el('text', { x: gx, y: base + 20, 'text-anchor': 'middle', style: `fill:${sel ? 'var(--ink)' : 'var(--ink2)'};font:${sel ? 700 : 500} 13px var(--font-display);pointer-events:none` }, 'n = ' + k));
+  }
+  c.append(el('rect', { x: 262, y: 4, width: 10, height: 10, style: 'fill:var(--ink3);fill-opacity:.55' }), el('text', { x: 277, y: 13, style: 'fill:var(--ink2);font:500 11.5px var(--font-display)' }, t('scm.before')));
+  c.append(el('rect', { x: 262, y: 20, width: 10, height: 10, style: 'fill:var(--keep)' }), el('text', { x: 277, y: 29, style: 'fill:var(--ink2);font:500 11.5px var(--font-display)' }, t('scm.after')));
+  // message
+  const f = v => v.toFixed(2); let msg;
+  if (n === 1) msg = mergeWins ? t('scm.r.merge', { m: f(scm.m), k: f(Tt[1]) }) : t('scm.r.one', { m: f(scm.m), k: f(Tt[1]) });
+  else if (n === 0) msg = t('scm.r.n0', { c: f(T[0]) }); else if (n === 4) msg = t('scm.r.n4'); else msg = t('scm.r.n', { n, d: 4 - n, c: f(T[n]) });
+  $('#scmOut').textContent = msg;
+}
+$('#scmN').addEventListener('input', e => { scm.n = +e.target.value; renderScm(); });
+
+/* ---------------- method video slot ---------------- */
+function initVideo() {
+  const V = SITE.methodVideo || {}, frame = $('#methodVideoFrame'), cap = $('#methodVideoCap');
+  if (V.embed || V.src) {
+    frame.classList.remove('empty'); frame.innerHTML = '';
+    if (V.embed) { const f = document.createElement('iframe'); f.src = V.embed; f.title = 'Method video'; f.loading = 'lazy'; f.allowFullscreen = true; f.allow = 'fullscreen; picture-in-picture'; f.referrerPolicy = 'no-referrer-when-downgrade'; frame.append(f); }
+    else { const v = document.createElement('video'); v.src = V.src.includes('#') ? V.src : V.src + '#t=0.1'; v.controls = true; v.playsInline = true; v.preload = 'metadata'; frame.append(v); }
+  }
+  const setCap = () => { cap.textContent = (V.cap && (V.cap[lang] || V.cap.en)) || ''; };
+  refreshers.push(setCap);
+}
+
+/* ---------------- cite, nav ---------------- */
+function initCite() {
+  $('#btnCopy').addEventListener('click', async () => {
+    const txt = $('#bibtex').textContent; try { await navigator.clipboard.writeText(txt); } catch (e) { const r = document.createRange(); r.selectNodeContents($('#bibtex')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); document.execCommand('copy'); s.removeAllRanges(); }
+    $('#btnCopy').textContent = t('ci.copied'); setTimeout(() => $('#btnCopy').textContent = t('ci.copy'), 1600);
+  });
+}
+function initNav() {
+  const links = $$('.nav nav a'), map = new Map(links.map(a => [a.getAttribute('href').slice(1), a]));
+  const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) links.forEach(a => a.removeAttribute('aria-current')), map.get(e.target.id)?.setAttribute('aria-current', 'true'); }), { rootMargin: '-45% 0px -50% 0px' });
+  map.forEach((_, id) => { const s = document.getElementById(id); if (s) io.observe(s); });
+}
+
+
+/* ---------------- backdrop: a quadtree mosaic that follows the gaze ---------------- */
+function initBackdrop() {
+  const cv = $('#bg'), ctx = cv.getContext('2d'), ROOT = 128, MIN = 16;
+  let w = 0, h = 0, gx = 0, gy = 0, tx = 0, ty = 0, lastMove = -1e9, lastDraw = 0, T = 0, col = null, line = [], hatchS = '';
+  const hash = (x, y, s) => { let n = Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(s, 2246822519) | 0; n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; };
+  function colors() {
+    const cs = getComputedStyle(document.documentElement), g = n => cs.getPropertyValue(n).trim(), dark = document.documentElement.dataset.theme === 'dark';
+    col = { rgb: g('--bg-rgb'), tint: [g('--keep'), g('--mid'), g('--coarse')], reticle: g('--keep'), dark };
+    line = [0, 1, 2, 3].map(k => `rgba(${col.rgb},${(dark ? .075 : .085) + k * (dark ? .05 : .04)})`);
+    hatchS = `rgba(${col.rgb},${dark ? .09 : .10})`;
+  }
+  function leaf(x, y, s) {
+    const k = Math.log2(ROOT / s), r = hash(x, y, s);
+    if (r < .23) {                                  // a "kept / merged" cell, slowly breathing
+      const pulse = .5 + .5 * Math.sin(T * .7 + r * 90);
+      ctx.globalAlpha = (.05 + .06 * k) * (.3 + .7 * pulse) * (col.dark ? 1 : .8);
+      ctx.fillStyle = col.tint[r < .09 ? 0 : r < .16 ? 1 : 2]; ctx.fillRect(x, y, s, s); ctx.globalAlpha = 1;
+    } else if (r < .33 && k < 3) {                  // a "dropped" cell: one slash
+      ctx.strokeStyle = hatchS; ctx.beginPath(); ctx.moveTo(x + s * .18, y + s * .82); ctx.lineTo(x + s * .82, y + s * .18); ctx.stroke();
+    }
+    ctx.strokeStyle = line[k]; ctx.strokeRect(x + .5, y + .5, s - 1, s - 1);
+  }
+  function cell(x, y, s) {
+    if (s > MIN && Math.hypot(x + s / 2 - gx, y + s / 2 - gy) < s * 1.55) { const q = s / 2; cell(x, y, q); cell(x + q, y, q); cell(x, y + q, q); cell(x + q, y + q, q); return; }
+    leaf(x, y, s);
+  }
+  function draw() {
+    if (!col) colors();
+    ctx.clearRect(0, 0, w, h); ctx.lineWidth = 1;
+    for (let y = 0; y < h; y += ROOT) for (let x = 0; x < w; x += ROOT) cell(x, y, ROOT);
+    // reticle locked on the finest cell under the gaze
+    const sx = Math.floor(gx / MIN) * MIN, sy = Math.floor(gy / MIN) * MIN, a = sx - MIN, b = sy - MIN, n = MIN * 3, L = 11;
+    ctx.strokeStyle = col.reticle; ctx.globalAlpha = col.dark ? .85 : .7; ctx.lineWidth = 1.5; ctx.beginPath();
+    for (const [px, py, dx, dy] of [[a, b, 1, 1], [a + n, b, -1, 1], [a, b + n, 1, -1], [a + n, b + n, -1, -1]]) { ctx.moveTo(px + dx * L, py); ctx.lineTo(px, py); ctx.lineTo(px, py + dy * L); }
+    ctx.stroke(); ctx.globalAlpha = 1; ctx.lineWidth = 1;
+  }
+  function resize() {
+    const dpr = Math.min(devicePixelRatio || 1, 1.5); w = innerWidth; h = innerHeight;
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!gx || reduced) { gx = tx = w * .72; gy = ty = h * .34; }
+    draw();
+  }
+  function frame(ts) {
+    requestAnimationFrame(frame);
+    if (document.hidden || ts - lastDraw < 33) return; lastDraw = ts; T = ts / 1000;
+    if (ts - lastMove > 4000) { tx = w * (.5 + .36 * Math.sin(T * .21)); ty = h * (.46 + .3 * Math.sin(T * .29 + 1.2)); }
+    gx += (tx - gx) * .09; gy += (ty - gy) * .09; draw();
+  }
+  addEventListener('resize', resize);
+  refreshers.push(() => { colors(); draw(); });
+  if (!reduced) {
+    addEventListener('pointermove', e => { tx = e.clientX; ty = e.clientY; lastMove = performance.now(); }, { passive: true });
+    requestAnimationFrame(frame);
+  }
+  colors(); resize();
+}
+
+/* ---------------- figures: Fig. 1 (Abstract) and Figure 4 (Results) ---------------- */
+function initFigure(slotId, cfg, capKey) {
+  const src = cfg && cfg.src, slot = $('#' + slotId); if (!src || !slot) return;
+  const im = new Image(); im.decoding = 'async';
+  im.onload = () => { slot.replaceWith(im); const alt = () => { im.alt = t(capKey); }; alt(); refreshers.push(alt); };
+  im.src = src;   // if it fails to load, the empty slot simply stays
+}
+
+/* ---------------- boot ---------------- */
+applyTheme();
+initBackdrop();
+buildScm(); refreshers.push(() => { buildScm(); renderScm(); }, buildPipe);
+initHero(); initFigure('fig1Slot', SITE.fig1, 'fig1.cap'); initFigure('fig4Slot', SITE.fig4, 'res.f4.cap'); initFigure('fig5aSlot', SITE.fig5a, 'ana.a.h'); initFigure('fig5bSlot', SITE.fig5b, 'ana.b.h'); initFigure('fig2Slot', SITE.fig2, 'ana.c.alt'); refreshers.push(renderResults); initVideo(); initVisualize(); initCite(); initNav();
+applyLang();
+
+</script>
+</body>
+</html>
