@@ -858,7 +858,7 @@ function renderResults() {
    ===================================================================== */
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
-let lang = store.get('fg-lang') || ((navigator.language || 'en').toLowerCase().startsWith('zh') ? 'zh' : 'en');
+let lang = store.get('fg-lang') || 'en';
 let theme = store.get('fg-theme') || 'dark';
 const t = (k, v) => { let s = (I18N[lang] && I18N[lang][k]) ?? I18N.en[k] ?? k; if (v) s = s.replace(/\{(\w+)\}/g, (_, n) => v[n] ?? ''); return s; };
 const refreshers = [];
