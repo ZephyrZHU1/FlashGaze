@@ -204,8 +204,9 @@ footer p{margin:0;max-width:44em}
 .vstage{border:1px solid var(--rule);background:var(--surface);padding:14px}
 .vmain{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .vs{position:relative;aspect-ratio:16/9;overflow:hidden;background:var(--screen);border:1px solid var(--rule)}
-.vs video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
-.vs video[hidden]{display:none}
+.vs video,.vs canvas{position:absolute;top:0;left:0;width:100%;height:100%;display:block}
+.vs video{width:200%;object-fit:fill}   /* side-by-side clip, left half in view; covered by the canvas once that has a frame */
+.vs video[hidden],.vs canvas[hidden]{display:none}
 .vs .tag{position:absolute;top:10px;left:10px;z-index:1;font:600 13px var(--font-display);padding:4px 10px;background:rgba(11,18,38,.8);color:#fff;pointer-events:none}
 .vs.fg{border-color:var(--bolt);box-shadow:0 0 0 1px color-mix(in srgb,var(--bolt) 55%,transparent),0 0 34px color-mix(in srgb,var(--bolt) 16%,transparent)}
 .vs.fg .tag{box-shadow:inset 3px 0 0 var(--bolt);padding-left:13px}
@@ -222,7 +223,7 @@ footer p{margin:0;max-width:44em}
 .vthumb{flex:0 0 calc((100% - 76px) / 7);scroll-snap-align:start;position:relative;padding:0;border:0;background:none;cursor:pointer;text-align:left;font:inherit;color:inherit;opacity:.8;transition:opacity .15s}
 .vthumb:hover,.vthumb[aria-selected=true]{opacity:1}
 .vthumb .tv{display:block;position:relative;aspect-ratio:16/9;overflow:hidden;background:var(--screen);border:1px solid var(--rule)}
-.vthumb video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none}
+.vthumb video{position:absolute;top:0;left:0;width:200%;height:100%;object-fit:fill;pointer-events:none}
 .vthumb .tn{position:absolute;top:6px;left:6px;z-index:1;font:700 11px var(--font-display);padding:1px 6px;background:rgba(11,18,38,.82);color:#fff}
 .vthumb .tl{position:absolute;left:0;right:0;bottom:0;z-index:1;padding:16px 8px 6px;font:500 12px/1.25 var(--font-display);color:#fff;background:linear-gradient(transparent,rgba(5,8,20,.88));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .vthumb.empty .tv{background:var(--surface);border:1px dashed var(--ink3)}
@@ -450,8 +451,8 @@ table.t3 thead th{padding-bottom:7px}
     </div>
     <div class="vstage" id="vstage">
       <div class="vmain">
-        <div class="vs ori empty" id="vsOri"><span class="tag" data-i18n="hero.orig"></span><video muted loop playsinline preload="none" disablepictureinpicture tabindex="-1" hidden></video></div>
-        <div class="vs fg empty" id="vsFg"><span class="tag" data-i18n="hero.fg"></span><video muted loop playsinline preload="none" disablepictureinpicture tabindex="-1" hidden></video></div>
+        <div class="vs ori empty" id="vsOri"><span class="tag" data-i18n="hero.orig"></span><video muted loop playsinline preload="none" disablepictureinpicture tabindex="-1" hidden></video><canvas aria-hidden="true" hidden></canvas></div>
+        <div class="vs fg empty" id="vsFg"><span class="tag" data-i18n="hero.fg"></span><canvas aria-hidden="true" hidden></canvas></div>
       </div>
       <div class="vinfo">
         <p class="vnow"><span class="vcount" id="vCount"></span><span class="vcaptxt" id="vCap"></span></p>
@@ -546,12 +547,13 @@ table.t3 thead th{padding-bottom:7px}
                                                          assets/vis/        <- the 8 Visualization clips
    2. Copy your video files into those folders.
    3. In the SITE block, replace each `null` with the file path, for example
-        { ori: 'assets/vis/01_ori.mp4', fg: 'assets/vis/01_fg.mp4' },   // clip 01
+        { src: 'assets/vis/01.mp4' },                                     // Visualization clip 01
         methodVideo: { src: 'assets/method.mp4' },                       // video in the Method section
         fig4: { src: 'assets/fig4.png' },                                 // an image
    4. Save the file and reload the page. Anything you leave as `null` stays an empty slot.
    Paths are relative to index.html, use forward slashes, and are case sensitive.
-   The two videos of a clip must have the same length, frame rate and 16:9 ratio.
+   A Visualization clip is ONE video: Original on the left half, FlashGaze on the right half, each half 16:9. To make one:
+        ffmpeg -i ori.mp4 -i fg.mp4 -filter_complex hstack -c:v libx264 -crf 23 -g 12 -pix_fmt yuv420p -movflags +faststart -an 01.mp4
    ===================================================================== */
 /* =====================================================================
    Site configuration  (edit this block)
@@ -567,18 +569,18 @@ const SITE = {
   methodVideo: { src: 'anon4method/Method_video.mp4', embed: null, cap: { en: '', zh: '' } },
   /* "Visualization" section: a big Original | FlashGaze pair, with a strip of small Original previews below it. Clicking a
      preview switches the big pair. 8 clips; empty slots are shown until you fill them in.
-     Per group:  ori: 'assets/vis/01_ori.mp4',  fg: 'assets/vis/01_fg.mp4'
-     optional:   cap: { en: '...', zh: '...' }   (caption shown under the pair and on the small preview)
-     Both videos of a group must have the same length, frame rate and aspect ratio (16:9). */
+     Per clip:   src: 'assets/vis/01.mp4'   ONE side-by-side video (Original left half | FlashGaze right half, see the ffmpeg line above).
+                 Being a single video, the two halves cannot drift apart, even while buffering on a slow connection.
+     optional:   cap: { en: '...', zh: '...' }   (caption shown under the pair and on the small preview) */
   visualize: [
-    { ori: 'assets/camel_ori.mp4', fg: 'assets/camel_fg.mp4' },   // 01
-    { ori: 'assets/cp_ori.mp4', fg: 'assets/cp_fg.mp4' },   // 02
-    { ori: 'assets/light_ori.mp4', fg: 'assets/light_fg.mp4' },   // 03
-    { ori: 'assets/boxing_ori.mp4', fg: 'assets/boxing_fg.mp4' },   // 04
-    { ori: 'assets/kneel_ori.mp4', fg: 'assets/kneel_fg.mp4' },   // 05
-    { ori: 'assets/skate_ori.mp4', fg: 'assets/skate_fg.mp4' },    // 06
-    { ori: 'assets/cycle_ori.mp4', fg: 'assets/cycle_fg.mp4' },   // 07
-    { ori: 'assets/golf_ori.mp4', fg: 'assets/golf_fg.mp4' }   // 08
+    { src: 'assets/vis/camel.mp4' },    // 01
+    { src: 'assets/vis/cp.mp4' },       // 02
+    { src: 'assets/vis/light.mp4' },    // 03
+    { src: 'assets/vis/boxing.mp4' },   // 04
+    { src: 'assets/vis/kneel.mp4' },    // 05
+    { src: 'assets/vis/skate.mp4' },    // 06
+    { src: 'assets/vis/cycle.mp4' },    // 07
+    { src: 'assets/vis/golf.mp4' }      // 08
   ],
   /* Fig. 1 (under the Abstract). Put the image in ./assets/ and set the path, e.g. src: 'assets/fig1.png'. null = empty slot. */
   fig1: { src: 'assets/Fig1.png' },
@@ -886,7 +888,7 @@ const ICON = {
 /* a Play/Pause button: icon + text; `playing` = true shows the Pause state */
 function setPlayButton(btn, playing) { btn.innerHTML = (playing ? ICON.pause : ICON.play) + '<span></span>'; $('span', btn).textContent = playing ? t('hero.pause') : t('hero.play'); btn.setAttribute('aria-pressed', String(playing)); }
 
-/* ---------------- two videos played in sync (hero + visualize) ---------------- */
+/* ---------------- two videos played in sync (hero) ---------------- */
 const pairs = [];
 /* Keep b aligned with a.
    - one side runs out of data (slow network) or drifts far: pause both ("held"), line b up with a while paused,
@@ -947,23 +949,39 @@ function initHero() {
   refreshers.push(label); label();
 }
 
-/* ---------------- visualize: big Original | FlashGaze pair + strip of small previews ---------------- */
+/* ---------------- visualize: one side-by-side clip shown as Original | FlashGaze panels + strip of small previews ---------------- */
 function initVisualize() {
   const items = SITE.visualize || [], total = items.length, strip = $('#vStrip'), prev = $('#vPrev'), next = $('#vNext');
-  const slots = [[$('#vsOri'), 'ori'], [$('#vsFg'), 'fg']].map(([el, k]) => ({ el, k, v: $('video', el) }));
-  let cur = -1, inView = false, armed = false, token = 0, active = [];
-  registerPair(slots[0].v, slots[1].v, () => inView && active.length === 2);
+  const panels = [[$('#vsOri'), 'hero.orig'], [$('#vsFg'), 'hero.fg']];
+  const vid = $('#vsOri video'), cvs = [$('#vsOri canvas'), $('#vsFg canvas')], ctx = cvs.map(c => c.getContext('2d'));
+  let cur = -1, inView = false, armed = false, token = 0;
   const ready = v => new Promise(r => v.readyState >= 3 ? r() : v.addEventListener('canplay', r, { once: true }));
-  const update = () => active.forEach(v => inView ? v.play().catch(() => {}) : v.pause());
+  const update = () => { if (vid.getAttribute('src')) inView ? vid.play().catch(() => {}) : vid.pause(); };
   const caption = it => (it.cap && (it.cap[lang] || it.cap.en)) || '';
 
-  // thumbnails: small Original previews
+  // Both panels are canvases cut from one snapshot of the current frame (left half / right half), so they always show
+  // the same frame; if drawing falls behind, both fall behind together. Drawing straight from the video twice could
+  // catch two different frames, since the video can advance between the two draws.
+  const snap = document.createElement('canvas'), sctx = snap.getContext('2d');
+  const paint = () => {
+    const W = vid.videoWidth, h = vid.videoHeight, w = W / 2; if (!W || vid.readyState < 2) return;
+    if (snap.width !== W || snap.height !== h) { snap.width = W; snap.height = h; }
+    sctx.drawImage(vid, 0, 0);
+    cvs.forEach((c, k) => { if (c.width !== w || c.height !== h) { c.width = w; c.height = h; } ctx[k].drawImage(snap, k * w, 0, w, h, 0, 0, w, h); });
+  };
+  if ('requestVideoFrameCallback' in vid) {
+    let fid = 0; const onFrame = () => { paint(); fid = vid.requestVideoFrameCallback(onFrame); };
+    vid.addEventListener('loadeddata', () => { vid.cancelVideoFrameCallback(fid); fid = vid.requestVideoFrameCallback(onFrame); });
+  } else { const onFrame = () => { if (!vid.paused) paint(); requestAnimationFrame(onFrame); }; requestAnimationFrame(onFrame); }
+  ['loadeddata', 'seeked'].forEach(ev => vid.addEventListener(ev, paint));
+
+  // thumbnails: small Original previews (left half of the clip)
   items.forEach((it, i) => {
-    const th = document.createElement('button'); th.type = 'button'; th.className = 'vthumb' + (it.ori ? '' : ' empty'); th.setAttribute('role', 'tab'); th.dataset.i = i;
+    const th = document.createElement('button'); th.type = 'button'; th.className = 'vthumb' + (it.src ? '' : ' empty'); th.setAttribute('role', 'tab'); th.dataset.i = i;
     th.innerHTML = '<span class="tv"></span><span class="tn"></span><span class="tl"></span>';
     $('.tn', th).textContent = String(i + 1).padStart(2, '0');
-    if (it.ori) {
-      const v = document.createElement('video'); v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'none'; v.disablePictureInPicture = true; v.tabIndex = -1; v.dataset.src = it.ori;
+    if (it.src) {
+      const v = document.createElement('video'); v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'none'; v.disablePictureInPicture = true; v.tabIndex = -1; v.dataset.src = it.src;
       $('.tv', th).append(v);
       if (!reduced) {   // hover to preview (mouse only)
         th.addEventListener('pointerenter', e => { if (e.pointerType !== 'mouse') return; v.play().catch(() => {}); });
@@ -980,18 +998,15 @@ function initVisualize() {
 
   function render(i) {                      // everything except loading video data
     cur = i; const it = items[i];
-    slots.forEach(s => s.el.classList.toggle('empty', !it[s.k]));
+    panels.forEach(([el]) => el.classList.toggle('empty', !it.src));
     $$('.vthumb', strip).forEach((th, k) => { th.setAttribute('aria-selected', String(k === i)); th.tabIndex = k === i ? 0 : -1; });
     text();
   }
-  function loadClip(i) {                    // assign sources and start both videos together
-    const it = items[i], my = ++token; active = [];
-    slots.forEach(s => {
-      const src = it[s.k]; s.v.pause();
-      if (src) { s.v.hidden = false; s.v.preload = 'auto'; s.v.src = src; active.push(s.v); }
-      else { s.v.hidden = true; s.v.removeAttribute('src'); s.v.load(); }
-    });
-    Promise.all(active.map(ready)).then(() => { if (my !== token) return; active.forEach(v => { v.currentTime = 0; }); update(); });
+  function loadClip(i) {                    // assign the clip's source and start it
+    const src = items[i].src, my = ++token;
+    vid.pause(); vid.hidden = !src; cvs.forEach((c, k) => { ctx[k].clearRect(0, 0, c.width, c.height); c.hidden = !src; });
+    if (src) { vid.preload = 'auto'; vid.src = src; ready(vid).then(() => { if (my === token) update(); }); }
+    else { vid.removeAttribute('src'); vid.load(); }
   }
   function select(i, user) {
     if (i === cur) return; render(i); if (armed) loadClip(i);
@@ -1005,7 +1020,7 @@ function initVisualize() {
       const c = caption(items[k]), nn = String(k + 1).padStart(2, '0'), name = t('vis.short', { n: nn });
       $('.tl', th).textContent = c || name; th.setAttribute('aria-label', c ? `${name}: ${c}` : name);
     });
-    slots.forEach(s => { const who = t(s.k === 'fg' ? 'hero.fg' : 'hero.orig'); if (s.el.classList.contains('empty')) { s.el.setAttribute('role', 'img'); s.el.setAttribute('aria-label', `${who}, ${t('vis.empty')}`); } else { s.el.removeAttribute('role'); s.el.setAttribute('aria-label', who); } });
+    panels.forEach(([el, k]) => { const who = t(k); if (el.classList.contains('empty')) { el.setAttribute('role', 'img'); el.setAttribute('aria-label', `${who}, ${t('vis.empty')}`); } else { el.removeAttribute('role'); el.setAttribute('aria-label', who); } });
   }
 
   // strip arrows
@@ -1015,12 +1030,12 @@ function initVisualize() {
   next.addEventListener('click', () => strip.scrollBy({ left: strip.clientWidth * .8, behavior: reduced ? 'auto' : 'smooth' }));
 
   // load video data only when the section is near the viewport; play only while it is on screen.
-  // Thumbnails wait until the big pair is fully downloaded (or 8 s), so they don't take bandwidth from it.
+  // Thumbnails wait until the big clip is fully downloaded (or 8 s), so they don't take bandwidth from it.
   const stage = $('#vstage');
   const fullyBuffered = v => new Promise(r => { const f = () => { const b = v.buffered; if (v.duration && b.length && b.end(b.length - 1) >= v.duration - .1) r(); }; ['progress', 'suspend'].forEach(ev => v.addEventListener(ev, f)); f(); });
   const loadThumbs = () => $$('.vthumb video', strip).forEach(v => { v.preload = 'metadata'; v.src = v.dataset.src + '#t=0.1'; });
   new IntersectionObserver((es, o) => { if (es[0].isIntersecting) { o.disconnect(); armed = true; loadClip(cur);
-    Promise.race([Promise.all(active.map(fullyBuffered)), new Promise(r => setTimeout(r, 8000))]).then(loadThumbs); nav(); } }, { rootMargin: '600px 0px' }).observe(stage);
+    Promise.race([vid.hidden ? 0 : fullyBuffered(vid), new Promise(r => setTimeout(r, 8000))]).then(loadThumbs); nav(); } }, { rootMargin: '600px 0px' }).observe(stage);
   new IntersectionObserver(es => { inView = es[0].isIntersecting; update(); }, { threshold: .25 }).observe($('.vmain', stage));
 
   render(0); nav();
