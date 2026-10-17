@@ -89,8 +89,9 @@ button{font:inherit;color:inherit}
 .finder::before{top:-7px;left:-7px;border-right:0;border-bottom:0}
 .finder::after{bottom:-7px;right:-7px;border-left:0;border-top:0}
 .vcmp{position:relative;aspect-ratio:16/9;overflow:hidden;background:var(--screen);cursor:ew-resize;touch-action:pan-y;user-select:none;-webkit-user-select:none}
-.vcmp video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
-.vcmp video+video{clip-path:inset(0 0 0 var(--split))}
+.vcmp video,.vcmp canvas{position:absolute;top:0;left:0;width:100%;height:100%;display:block;pointer-events:none}
+.vcmp video{width:200%;object-fit:fill}   /* side-by-side clip, left half in view; covered by the canvases once they have a frame */
+.vcmp canvas+canvas{clip-path:inset(0 0 0 var(--split))}
 .vcmp .vbar{position:absolute;top:0;bottom:0;left:var(--split);width:3px;margin-left:-1.5px;background:#fff;pointer-events:none}
 .vcmp .knob{position:absolute;top:50%;left:var(--split);width:36px;height:36px;margin:-18px 0 0 -18px;border-radius:50%;background:#fff;color:#0B1226;display:grid;place-items:center;box-shadow:0 2px 10px rgba(0,0,0,.45);pointer-events:none}
 .vcmp .knob svg{width:20px;height:20px}
@@ -343,8 +344,9 @@ table.t3 thead th{padding-bottom:7px}
     <div>
       <div class="finder" id="heroFinder" style="--split:46%">
         <div class="vcmp" id="vcmp" role="img" aria-label="Side-by-side comparison: an original video of a horse and rider, and the same video after FlashGaze pruning">
-          <video id="vFg" src="assets/horse_fg.mp4" muted loop playsinline preload="auto" disablepictureinpicture tabindex="-1"></video>
-          <video id="vOri" src="assets/horse_ori.mp4" muted loop playsinline preload="auto" disablepictureinpicture tabindex="-1"></video>
+          <video id="vHero" src="assets/horse.mp4" muted loop playsinline preload="auto" disablepictureinpicture tabindex="-1"></video>
+          <canvas id="cFg" aria-hidden="true"></canvas>
+          <canvas id="cOri" aria-hidden="true"></canvas>
           <span class="vbar" aria-hidden="true"></span>
           <span class="knob" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 7 4 12l5 5zM15 7l5 5-5 5z" fill="currentColor"/></svg></span>
           <span class="tag l" data-i18n="hero.fg"></span><span class="tag r" data-i18n="hero.orig"></span>
@@ -888,59 +890,41 @@ const ICON = {
 /* a Play/Pause button: icon + text; `playing` = true shows the Pause state */
 function setPlayButton(btn, playing) { btn.innerHTML = (playing ? ICON.pause : ICON.play) + '<span></span>'; $('span', btn).textContent = playing ? t('hero.pause') : t('hero.play'); btn.setAttribute('aria-pressed', String(playing)); }
 
-/* ---------------- two videos played in sync (hero) ---------------- */
-const pairs = [];
-/* Keep b aligned with a.
-   - one side runs out of data (slow network) or drifts far: pause both ("held"), line b up with a while paused,
-     resume both once each can play on. Gives up waiting after 4 s so a browser that stops buffering paused media can't deadlock.
-   - small drift: nudge b's playback rate by up to 10% (invisible, no seek stutter) */
-const starving = v => v.readyState < 3 && !v.seeking;
-setInterval(() => {
-  const now = performance.now();
-  for (const p of pairs) {
-    const { a, b } = p; if (a === b) continue;
-    if (p.held) {
-      if (!p.wants()) { p.held = false; continue; }
-      const stuck = now - p.heldAt > 4000;
-      if (!stuck && (starving(a) || starving(b) || a.seeking || b.seeking)) continue;
-      if (!stuck && Math.abs(a.currentTime - b.currentTime) > .04) { b.currentTime = a.currentTime; continue; }
-      p.held = false; a.play().catch(() => {}); b.play().catch(() => {});
-      continue;
-    }
-    if (a.paused || b.paused) { if (b.playbackRate !== 1) b.playbackRate = 1; continue; }
-    let d = a.currentTime - b.currentTime;                         // > 0: b is behind
-    const D = a.duration; if (D && Math.abs(d) > D / 2) d -= Math.sign(d) * D;   // one side has already looped back to 0
-    if (starving(a) || starving(b) || Math.abs(d) > .25) { p.held = true; p.heldAt = now; b.playbackRate = 1; a.pause(); b.pause(); }
-    else if (Math.abs(d) > .03) b.playbackRate = 1 + Math.max(-.1, Math.min(.1, d * .6));
-    else if (b.playbackRate !== 1) b.playbackRate = 1;
-  }
-}, 150);
-/* Register two <video>s so their drift is corrected by the loop above. wants(): whether the pair should be playing now. */
-function registerPair(a, b, wants) {
-  const rec = { a, b, wants, held: false, heldAt: 0 }; pairs.push(rec);
-  return rec;
-}
-/* a, b: <video> elements with identical length and frame rate (b may equal a for a single clip).
-   Plays only while `target` is visible and `want` is true. */
-function pairPlayer(a, b, target, want) {
-  let inView = false;
-  const rec = registerPair(a, b, () => want && inView);
-  const ready = v => new Promise(r => v.readyState >= 3 ? r() : v.addEventListener('canplay', r, { once: true }));
-  async function play() { try { if (a !== b && Math.abs(a.currentTime - b.currentTime) > .05) b.currentTime = a.currentTime; await Promise.all(a === b ? [a.play()] : [a.play(), b.play()]); } catch (e) { /* autoplay blocked: stays paused */ } }
-  function pause() { rec.held = false; a.pause(); if (b !== a) { b.pause(); b.playbackRate = 1; } }
-  const update = () => (want && inView) ? play() : pause();
-  new IntersectionObserver(es => { inView = es[0].isIntersecting; update(); }, { threshold: .15 }).observe(target);
-  Promise.all([ready(a), ready(b)]).then(() => { a.currentTime = b.currentTime = 0; update(); });
-  return { setWant(v) { want = v; update(); }, playing: () => !a.paused || rec.held };   // held = paused only to wait for data
+/* ---------------- side-by-side clips (hero + visualize) ---------------- */
+/* A comparison clip is ONE video: Original on the left half, FlashGaze on the right half. Being a single video, the two
+   can never drift apart, even while buffering. splitClip() draws the halves into two canvases, both cut from one snapshot
+   of the current frame, so they always show the same frame (drawing straight from the video twice could catch two
+   different frames, since the video can advance between the two draws). */
+function splitClip(vid, cOri, cFg) {
+  const snap = document.createElement('canvas'), sctx = snap.getContext('2d');
+  const out = [[cOri, 0], [cFg, 1]].map(([c, k]) => ({ c, k, x: c.getContext('2d') }));
+  const paint = () => {
+    const W = vid.videoWidth, h = vid.videoHeight, w = W / 2; if (!W || vid.readyState < 2) return;
+    if (snap.width !== W || snap.height !== h) { snap.width = W; snap.height = h; }
+    sctx.drawImage(vid, 0, 0);
+    out.forEach(({ c, k, x }) => { if (c.width !== w || c.height !== h) { c.width = w; c.height = h; } x.drawImage(snap, k * w, 0, w, h, 0, 0, w, h); });
+  };
+  let arm = () => {};
+  if ('requestVideoFrameCallback' in vid) {
+    let fid = 0; const onFrame = () => { paint(); fid = vid.requestVideoFrameCallback(onFrame); };
+    arm = () => { vid.cancelVideoFrameCallback(fid); fid = vid.requestVideoFrameCallback(onFrame); };
+  } else { const onFrame = () => { if (!vid.paused) paint(); requestAnimationFrame(onFrame); }; requestAnimationFrame(onFrame); }
+  vid.addEventListener('loadeddata', () => { arm(); paint(); });
+  vid.addEventListener('seeked', paint);
+  if (vid.readyState >= 2) { arm(); paint(); }   // data may have arrived before this script ran
+  return { clear() { out.forEach(({ c, x }) => x.clearRect(0, 0, c.width, c.height)); } };
 }
 
 /* ---------------- hero: original vs FlashGaze, draggable divider ---------------- */
 function initHero() {
-  const box = $('#heroFinder'), vc = $('#vcmp'), a = $('#vOri'), b = $('#vFg'), split = $('#heroSplit'), btn = $('#heroPlay');
-  const pp = pairPlayer(a, b, vc, !reduced);
-  const label = () => setPlayButton(btn, pp.playing());
-  btn.addEventListener('click', () => { pp.setWant(!pp.playing()); label(); });
-  ['play', 'pause'].forEach(ev => a.addEventListener(ev, label));
+  const box = $('#heroFinder'), vc = $('#vcmp'), vid = $('#vHero'), split = $('#heroSplit'), btn = $('#heroPlay');
+  splitClip(vid, $('#cOri'), $('#cFg'));
+  let want = !reduced, inView = false;
+  const update = () => (want && inView) ? vid.play().catch(() => {}) : vid.pause();
+  new IntersectionObserver(es => { inView = es[0].isIntersecting; update(); }, { threshold: .15 }).observe(vc);
+  const label = () => setPlayButton(btn, !vid.paused);
+  btn.addEventListener('click', () => { want = vid.paused; update(); });
+  ['play', 'pause'].forEach(ev => vid.addEventListener(ev, label));
   const setSplit = v => box.style.setProperty('--split', v + '%');
   const drag = e => { const r = vc.getBoundingClientRect(), v = Math.min(100, Math.max(0, (e.clientX - r.left) / r.width * 100)); split.value = v; setSplit(v); };
   vc.addEventListener('pointerdown', e => { vc.setPointerCapture(e.pointerId); drag(e); });
@@ -953,27 +937,11 @@ function initHero() {
 function initVisualize() {
   const items = SITE.visualize || [], total = items.length, strip = $('#vStrip'), prev = $('#vPrev'), next = $('#vNext');
   const panels = [[$('#vsOri'), 'hero.orig'], [$('#vsFg'), 'hero.fg']];
-  const vid = $('#vsOri video'), cvs = [$('#vsOri canvas'), $('#vsFg canvas')], ctx = cvs.map(c => c.getContext('2d'));
+  const vid = $('#vsOri video'), cvs = [$('#vsOri canvas'), $('#vsFg canvas')], clip = splitClip(vid, ...cvs);
   let cur = -1, inView = false, armed = false, token = 0;
   const ready = v => new Promise(r => v.readyState >= 3 ? r() : v.addEventListener('canplay', r, { once: true }));
   const update = () => { if (vid.getAttribute('src')) inView ? vid.play().catch(() => {}) : vid.pause(); };
   const caption = it => (it.cap && (it.cap[lang] || it.cap.en)) || '';
-
-  // Both panels are canvases cut from one snapshot of the current frame (left half / right half), so they always show
-  // the same frame; if drawing falls behind, both fall behind together. Drawing straight from the video twice could
-  // catch two different frames, since the video can advance between the two draws.
-  const snap = document.createElement('canvas'), sctx = snap.getContext('2d');
-  const paint = () => {
-    const W = vid.videoWidth, h = vid.videoHeight, w = W / 2; if (!W || vid.readyState < 2) return;
-    if (snap.width !== W || snap.height !== h) { snap.width = W; snap.height = h; }
-    sctx.drawImage(vid, 0, 0);
-    cvs.forEach((c, k) => { if (c.width !== w || c.height !== h) { c.width = w; c.height = h; } ctx[k].drawImage(snap, k * w, 0, w, h, 0, 0, w, h); });
-  };
-  if ('requestVideoFrameCallback' in vid) {
-    let fid = 0; const onFrame = () => { paint(); fid = vid.requestVideoFrameCallback(onFrame); };
-    vid.addEventListener('loadeddata', () => { vid.cancelVideoFrameCallback(fid); fid = vid.requestVideoFrameCallback(onFrame); });
-  } else { const onFrame = () => { if (!vid.paused) paint(); requestAnimationFrame(onFrame); }; requestAnimationFrame(onFrame); }
-  ['loadeddata', 'seeked'].forEach(ev => vid.addEventListener(ev, paint));
 
   // thumbnails: small Original previews (left half of the clip)
   items.forEach((it, i) => {
@@ -1004,7 +972,7 @@ function initVisualize() {
   }
   function loadClip(i) {                    // assign the clip's source and start it
     const src = items[i].src, my = ++token;
-    vid.pause(); vid.hidden = !src; cvs.forEach((c, k) => { ctx[k].clearRect(0, 0, c.width, c.height); c.hidden = !src; });
+    vid.pause(); clip.clear(); vid.hidden = !src; cvs.forEach(c => { c.hidden = !src; });
     if (src) { vid.preload = 'auto'; vid.src = src; ready(vid).then(() => { if (my === token) update(); }); }
     else { vid.removeAttribute('src'); vid.load(); }
   }
